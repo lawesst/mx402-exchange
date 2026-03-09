@@ -29,6 +29,7 @@ const ASSET_IDENTIFIER = process.env.MX402_ASSET_IDENTIFIER ?? "EGLD";
 const CHAIN_ID = process.env.MX402_CHAIN_ID ?? "D";
 const DEPOSIT_ATOMIC = process.env.MX402_SCENARIO_DEPOSIT_ATOMIC ?? "20000000000000000";
 const PRODUCT_PRICE_ATOMIC = process.env.MX402_SCENARIO_PRICE_ATOMIC ?? "1000000000000000";
+const CALL_COUNT = Number(process.env.MX402_SCENARIO_CALL_COUNT ?? "1");
 
 type NativeAuthIdentity = {
   address: string;
@@ -200,8 +201,8 @@ async function main() {
   }
 
   const adminSecret = process.env.MX402_SCENARIO_ADMIN_PRIVATE_KEY ?? requireEnv("MX402_OWNER_PRIVATE_KEY");
-  const providerSecret = requireEnv("MX402_PROVIDER_PRIVATE_KEY");
-  const buyerSecret = requireEnv("MX402_BUYER_PRIVATE_KEY");
+  const providerSecret = process.env.MX402_PROVIDER_PRIVATE_KEY ?? adminSecret;
+  const buyerSecret = process.env.MX402_BUYER_PRIVATE_KEY ?? adminSecret;
   const settlementSecret = process.env.MX402_SETTLEMENT_PRIVATE_KEY ?? adminSecret;
 
   const adminWallet = getSigner(adminSecret);
@@ -242,6 +243,7 @@ async function main() {
   const adminIdentity = await createNativeAuthIdentity(adminSecret);
   const providerIdentity = await createNativeAuthIdentity(providerSecret);
   const buyerIdentity = await createNativeAuthIdentity(buyerSecret);
+  console.log("[scenario] native auth identities ready");
 
   const adminClient = new CookieClient(`http://127.0.0.1:${API_PORT}`);
   const providerClient = new CookieClient(`http://127.0.0.1:${API_PORT}`);
@@ -270,6 +272,7 @@ async function main() {
       displayName: "Devnet Buyer"
     })
   });
+  console.log("[scenario] api sessions established");
 
   const providerProfile = await providerClient.request<{ id: string }>("/v1/providers", {
     method: "POST",
@@ -281,6 +284,7 @@ async function main() {
       payoutWalletAddress: providerWallet.address
     })
   });
+  console.log("[scenario] provider created", providerProfile.data.id);
 
   const product = await providerClient.request<{ id: string }>("/v1/providers/me/products", {
     method: "POST",
@@ -302,10 +306,12 @@ async function main() {
       outputSchemaJson: {}
     })
   });
+  console.log("[scenario] product created", product.data.id);
 
   await providerClient.request(`/v1/providers/me/products/${product.data.id}/submit`, {
     method: "POST"
   });
+  console.log("[scenario] product submitted");
 
   await adminClient.request(`/v1/admin/providers/${providerProfile.data.id}/approve`, {
     method: "POST",
@@ -313,6 +319,7 @@ async function main() {
       notes: "Approved by real devnet scenario"
     })
   });
+  console.log("[scenario] provider approved");
 
   await adminClient.request(`/v1/admin/products/${product.data.id}/activate`, {
     method: "POST",
@@ -320,18 +327,22 @@ async function main() {
       notes: "Activated by real devnet scenario"
     })
   });
+  console.log("[scenario] product activated");
 
   const buyerSignerSession = await createSignerSession(buyerSecret);
+  console.log("[scenario] buyer signer ready", buyerWallet.address);
   const depositTxHash = await depositToLedgerOnChain(buyerSignerSession, {
     contractAddress: LEDGER_CONTRACT,
     assetIdentifier: ASSET_IDENTIFIER,
     amountAtomic: DEPOSIT_ATOMIC
   });
+  console.log("[scenario] deposit submitted", depositTxHash);
   const depositObserved = await waitForTransactionFinality({
     txHash: depositTxHash,
     timeoutMs: Number(process.env.MX402_SCENARIO_CHAIN_TIMEOUT_MS ?? "180000"),
     pollIntervalMs: Number(process.env.MX402_SCENARIO_CHAIN_POLL_MS ?? "6000")
   });
+  console.log("[scenario] deposit confirmed", depositObserved.status);
 
   if (!["success", "executed"].includes(depositObserved.status.toLowerCase())) {
     throw new Error(`Deposit failed with status ${depositObserved.status}`);
@@ -344,11 +355,14 @@ async function main() {
       amountAtomic: DEPOSIT_ATOMIC
     })
   });
+  console.log("[scenario] deposit tracked");
 
   const depositSync = await syncTrackedDeposits(logger);
+  console.log("[scenario] deposit sync", JSON.stringify(depositSync));
   const buyerBalanceAfterDeposit = await buyerClient.request<{ spendableAtomic: string }>("/v1/balance", {
     method: "GET"
   });
+  console.log("[scenario] buyer balance after deposit", buyerBalanceAfterDeposit.data.spendableAtomic);
 
   const project = await buyerClient.request<{ id: string }>("/v1/projects", {
     method: "POST",
@@ -356,6 +370,7 @@ async function main() {
       name: "Devnet Buyer Project"
     })
   });
+  console.log("[scenario] buyer project created", project.data.id);
 
   const apiKeyResponse = await buyerClient.request<{ apiKey: string }>(`/v1/projects/${project.data.id}/api-keys`, {
     method: "POST",
@@ -363,6 +378,7 @@ async function main() {
       name: "Devnet Scenario Key"
     })
   });
+  console.log("[scenario] api key created");
 
   await buyerClient.request(`/v1/projects/${project.data.id}/grants`, {
     method: "POST",
@@ -370,86 +386,130 @@ async function main() {
       productId: product.data.id
     })
   });
+  console.log("[scenario] product grant created");
 
-  const gatewayResponse = await fetch(`http://127.0.0.1:${GATEWAY_PORT}/v1/gateway/products/${product.data.id}/call`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${apiKeyResponse.data.apiKey}`,
-      "content-type": "application/json",
-      "idempotency-key": `devnet-scenario-${Date.now()}`
-    },
-    body: JSON.stringify({
-      pathParams: {
-        address: buyerWallet.address
+  const settlementTxHashes: string[] = [];
+  const claimTxHashes: string[] = [];
+  const receiptIds: string[] = [];
+  const receipts: unknown[] = [];
+  let lastGatewayBody: Record<string, string> | null = null;
+  let lastSettlementConfirmation: { confirmed: number; failed: number; pending: number } | null = null;
+  let lastClaimConfirmation: { confirmed: number; failed: number; pending: number } | null = null;
+  let lastProviderEarningsAfterSettlement:
+    | {
+        unsettledEarnedAtomic: string;
+        claimableOnchainAtomic: string;
+        claimedTotalAtomic: string;
+      }
+    | null = null;
+
+  for (let index = 0; index < CALL_COUNT; index += 1) {
+    const testNumber = index + 1;
+    console.log(`[scenario] test ${testNumber}/${CALL_COUNT} starting`);
+
+    const gatewayResponse = await fetch(`http://127.0.0.1:${GATEWAY_PORT}/v1/gateway/products/${product.data.id}/call`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKeyResponse.data.apiKey}`,
+        "content-type": "application/json",
+        "idempotency-key": `devnet-scenario-${testNumber}-${Date.now()}`
       },
-      query: {},
-      body: null
-    })
-  });
+      body: JSON.stringify({
+        pathParams: {
+          address: buyerWallet.address
+        },
+        query: {},
+        body: null
+      })
+    });
 
-  const gatewayBody = await gatewayResponse.json();
-  if (!gatewayResponse.ok) {
-    throw new Error(`Gateway call failed: ${JSON.stringify(gatewayBody)}`);
-  }
+    const gatewayBody = await gatewayResponse.json();
+    if (!gatewayResponse.ok) {
+      throw new Error(`Gateway call failed on test ${testNumber}: ${JSON.stringify(gatewayBody)}`);
+    }
+    lastGatewayBody = gatewayBody as Record<string, string>;
+    receiptIds.push(lastGatewayBody.receiptId);
+    console.log("[scenario] gateway call succeeded", lastGatewayBody.receiptId);
 
-  const settlementRun = await runSettlementCycle(logger);
-  const settlementTxHash = settlementRun.submittedBatch?.txHash;
-  if (!settlementTxHash) {
-    throw new Error("Settlement cycle did not submit a batch");
-  }
+    const settlementRun = await runSettlementCycle(logger);
+    console.log("[scenario] settlement cycle", JSON.stringify(settlementRun));
+    const settlementTxHash = settlementRun.submittedBatch?.txHash;
+    if (!settlementTxHash) {
+      throw new Error(`Settlement cycle did not submit a batch on test ${testNumber}`);
+    }
+    settlementTxHashes.push(settlementTxHash);
 
-  const settlementObserved = await waitForTransactionFinality({
-    txHash: settlementTxHash,
-    timeoutMs: Number(process.env.MX402_SCENARIO_CHAIN_TIMEOUT_MS ?? "180000"),
-    pollIntervalMs: Number(process.env.MX402_SCENARIO_CHAIN_POLL_MS ?? "6000")
-  });
+    const settlementObserved = await waitForTransactionFinality({
+      txHash: settlementTxHash,
+      timeoutMs: Number(process.env.MX402_SCENARIO_CHAIN_TIMEOUT_MS ?? "180000"),
+      pollIntervalMs: Number(process.env.MX402_SCENARIO_CHAIN_POLL_MS ?? "6000")
+    });
+    console.log("[scenario] settlement confirmed", settlementObserved.status);
 
-  if (!["success", "executed"].includes(settlementObserved.status.toLowerCase())) {
-    throw new Error(`Settlement transaction failed with status ${settlementObserved.status}`);
-  }
+    if (!["success", "executed"].includes(settlementObserved.status.toLowerCase())) {
+      throw new Error(`Settlement transaction failed on test ${testNumber} with status ${settlementObserved.status}`);
+    }
 
-  const settlementConfirmation = await confirmSubmittedSettlementBatches(logger);
-  const providerEarnings = await providerClient.request<{
-    providerId: string;
-    balances: {
-      unsettledEarnedAtomic: string;
-      claimableOnchainAtomic: string;
-      claimedTotalAtomic: string;
-    };
-  }>("/v1/providers/me/earnings", {
-    method: "GET"
-  });
+    const settlementConfirmation = await confirmSubmittedSettlementBatches(logger);
+    lastSettlementConfirmation = settlementConfirmation;
+    console.log("[scenario] settlement confirmation", JSON.stringify(settlementConfirmation));
+    const providerEarnings = await providerClient.request<{
+      providerId: string;
+      balances: {
+        unsettledEarnedAtomic: string;
+        claimableOnchainAtomic: string;
+        claimedTotalAtomic: string;
+      };
+    }>("/v1/providers/me/earnings", {
+      method: "GET"
+    });
+    lastProviderEarningsAfterSettlement = providerEarnings.data.balances;
+    console.log("[scenario] provider earnings after settlement", JSON.stringify(providerEarnings.data.balances));
 
-  const claimableAtomic = providerEarnings.data.balances.claimableOnchainAtomic;
-  if (BigInt(claimableAtomic) <= 0n) {
-    throw new Error("Provider has no claimable on-chain balance after settlement");
-  }
+    const claimableAtomic = providerEarnings.data.balances.claimableOnchainAtomic;
+    if (BigInt(claimableAtomic) <= 0n) {
+      throw new Error(`Provider has no claimable on-chain balance after settlement on test ${testNumber}`);
+    }
 
-  const providerSignerSession = await createSignerSession(providerSecret);
-  const claimTxHash = await claimProviderEarningsOnChain(providerSignerSession, {
-    contractAddress: LEDGER_CONTRACT,
-    providerId: providerProfile.data.id,
-    amountAtomic: claimableAtomic
-  });
-  const claimObserved = await waitForTransactionFinality({
-    txHash: claimTxHash,
-    timeoutMs: Number(process.env.MX402_SCENARIO_CHAIN_TIMEOUT_MS ?? "180000"),
-    pollIntervalMs: Number(process.env.MX402_SCENARIO_CHAIN_POLL_MS ?? "6000")
-  });
-
-  if (!["success", "executed"].includes(claimObserved.status.toLowerCase())) {
-    throw new Error(`Provider claim failed with status ${claimObserved.status}`);
-  }
-
-  await providerClient.request("/v1/providers/me/claim/track", {
-    method: "POST",
-    body: JSON.stringify({
-      txHash: claimTxHash,
+    const providerSignerSession = await createSignerSession(providerSecret);
+    const claimTxHash = await claimProviderEarningsOnChain(providerSignerSession, {
+      contractAddress: LEDGER_CONTRACT,
+      providerId: providerProfile.data.id,
       amountAtomic: claimableAtomic
-    })
-  });
+    });
+    claimTxHashes.push(claimTxHash);
+    console.log("[scenario] claim submitted", claimTxHash);
+    const claimObserved = await waitForTransactionFinality({
+      txHash: claimTxHash,
+      timeoutMs: Number(process.env.MX402_SCENARIO_CHAIN_TIMEOUT_MS ?? "180000"),
+      pollIntervalMs: Number(process.env.MX402_SCENARIO_CHAIN_POLL_MS ?? "6000")
+    });
+    console.log("[scenario] claim confirmed", claimObserved.status);
 
-  const claimConfirmation = await confirmSubmittedProviderClaims(logger);
+    if (!["success", "executed"].includes(claimObserved.status.toLowerCase())) {
+      throw new Error(`Provider claim failed on test ${testNumber} with status ${claimObserved.status}`);
+    }
+
+    await providerClient.request("/v1/providers/me/claim/track", {
+      method: "POST",
+      body: JSON.stringify({
+        txHash: claimTxHash,
+        amountAtomic: claimableAtomic
+      })
+    });
+    console.log("[scenario] claim tracked");
+
+    const claimConfirmation = await confirmSubmittedProviderClaims(logger);
+    lastClaimConfirmation = claimConfirmation;
+    console.log("[scenario] claim confirmation", JSON.stringify(claimConfirmation));
+
+    const receipt = await buyerClient.request(`/v1/usage/receipts/${lastGatewayBody.receiptId}`, {
+      method: "GET"
+    });
+    receipts.push(receipt.data);
+    console.log(`[scenario] test ${testNumber}/${CALL_COUNT} completed`);
+  }
+
   const providerEarningsAfterClaim = await providerClient.request<{
     balances: {
       unsettledEarnedAtomic: string;
@@ -460,31 +520,28 @@ async function main() {
     method: "GET"
   });
 
-  const receipt = await buyerClient.request(`/v1/usage/receipts/${gatewayBody.receiptId}`, {
-    method: "GET"
-  });
-
   console.log(JSON.stringify({
     contractAddress: LEDGER_CONTRACT,
     assetIdentifier: ASSET_IDENTIFIER,
+    testsRun: CALL_COUNT,
     adminWallet: adminWallet.address,
     providerWallet: providerWallet.address,
     buyerWallet: buyerWallet.address,
     depositTxHash,
-    settlementTxHash,
-    claimTxHash,
+    settlementTxHashes,
+    claimTxHashes,
     providerId: providerProfile.data.id,
     productId: product.data.id,
-    receiptId: gatewayBody.receiptId,
+    receiptIds,
     buyerBalanceAfterDeposit: buyerBalanceAfterDeposit.data.spendableAtomic,
-    gatewayChargedAtomic: gatewayBody.chargedAtomic,
-    gatewayBalanceRemainingAtomic: gatewayBody.balanceRemainingAtomic,
-    providerBalancesAfterSettlement: providerEarnings.data.balances,
+    gatewayChargedAtomic: lastGatewayBody?.chargedAtomic ?? null,
+    gatewayBalanceRemainingAtomic: lastGatewayBody?.balanceRemainingAtomic ?? null,
+    providerBalancesAfterSettlement: lastProviderEarningsAfterSettlement,
     providerBalancesAfterClaim: providerEarningsAfterClaim.data.balances,
     depositSync,
-    settlementConfirmation,
-    claimConfirmation,
-    receipt: receipt.data
+    settlementConfirmation: lastSettlementConfirmation,
+    claimConfirmation: lastClaimConfirmation,
+    receipts
   }, null, 2));
 
   await apiApp.close();
