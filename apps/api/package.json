@@ -1,0 +1,22 @@
+{
+  "name": "@mx402/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^10.0.1",
+    "@mx402/config": "file:../../packages/config",
+    "@mx402/db": "file:../../packages/db",
+    "@mx402/domain": "file:../../packages/domain",
+    "@mx402/multiversx": "file:../../packages/multiversx",
+    "@mx402/observability": "file:../../packages/observability",
+    "@multiversx/sdk-native-auth-server": "^2.1.0",
+    "fastify": "^5.2.1"
+  }
+}

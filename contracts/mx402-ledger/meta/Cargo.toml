@@ -1,0 +1,11 @@
+[package]
+name = "mx402-ledger-meta"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[dependencies.mx402-ledger]
+path = ".."
+
+[dependencies.multiversx-sc-meta]
+version = "0.64.1"

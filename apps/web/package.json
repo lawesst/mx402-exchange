@@ -1,0 +1,16 @@
+{
+  "name": "@mx402/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next build",
+    "dev": "next dev",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@multiversx/sdk-dapp": "^5.0.0",
+    "next": "14.2.35",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  }
+}

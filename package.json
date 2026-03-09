@@ -1,0 +1,29 @@
+{
+  "name": "mx402-exchange",
+  "private": true,
+  "packageManager": "npm@11.3.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run prisma:generate --workspace @mx402/db && npm run build --workspaces --if-present",
+    "db:push": "npm run db:push --workspace @mx402/db",
+    "dev:api": "npm run dev --workspace @mx402/api",
+    "dev:gateway": "npm run dev --workspace @mx402/gateway",
+    "dev:worker": "npm run dev --workspace @mx402/worker",
+    "dev:web": "npm run dev --workspace @mx402/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "prisma:generate": "npm run prisma:generate --workspace @mx402/db",
+    "sync:deposits": "npm run sync:deposits --workspace @mx402/worker"
+  },
+  "overrides": {
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

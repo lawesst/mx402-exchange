@@ -1,0 +1,21 @@
+[package]
+name = "mx402-ledger"
+version = "0.0.0"
+publish = false
+edition = "2024"
+authors = ["MX402"]
+
+[lib]
+path = "src/mx402_ledger.rs"
+
+[dependencies.multiversx-sc]
+version = "0.64.1"
+
+[dev-dependencies.multiversx-sc-scenario]
+version = "0.64.1"
+
+[workspace]
+members = [
+    ".",
+    "meta",
+]

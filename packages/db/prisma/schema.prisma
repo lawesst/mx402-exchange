@@ -1,0 +1,451 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProviderStatus {
+  pending
+  approved
+  rejected
+  suspended
+}
+
+enum ProductStatus {
+  draft
+  pending_review
+  active
+  paused
+  archived
+}
+
+enum ProjectStatus {
+  active
+  suspended
+  archived
+}
+
+enum ApiKeyStatus {
+  active
+  revoked
+}
+
+enum GrantStatus {
+  active
+  revoked
+}
+
+enum ReservationStatus {
+  reserved
+  released
+  finalized
+}
+
+enum UsageStatus {
+  success
+  upstream_error
+  timeout
+  rejected
+}
+
+enum SettlementBatchStatus {
+  prepared
+  submitted
+  confirmed
+  failed
+}
+
+enum SettlementLineType {
+  buyer_debit
+  provider_credit
+  platform_fee
+}
+
+enum ChainTxKind {
+  deposit
+  withdraw
+  settlement
+  provider_claim
+}
+
+enum ChainTxStatus {
+  submitted
+  confirmed
+  failed
+}
+
+enum HttpMethod {
+  GET
+  POST
+}
+
+enum ChargePolicy {
+  success_only
+}
+
+enum OriginAuthMode {
+  none
+  static_header
+}
+
+enum IdempotencyStatus {
+  processing
+  completed
+  failed
+}
+
+model User {
+  id             String        @id @default(uuid()) @db.Uuid
+  wallet_address String        @unique @db.VarChar(80)
+  display_name   String?       @db.VarChar(80)
+  email          String?       @db.VarChar(255)
+  is_admin       Boolean       @default(false)
+  created_at     DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime      @updatedAt @db.Timestamptz(6)
+  provider       Provider?     @relation("ProviderOwner")
+  walletSessions WalletSession[]
+  buyerProjects  BuyerProject[]
+  buyerBalance   BuyerBalance?
+  reservations   UsageReservation[] @relation("ReservationBuyer")
+  usageEvents    UsageEvent[]       @relation("UsageEventBuyer")
+  settlementLines SettlementLine[]  @relation("SettlementLineBuyer")
+  chainTxs       ChainTransaction[] @relation("ChainTxUser")
+  adminLogs      AdminAuditLog[]
+
+  @@map("users")
+}
+
+model WalletSession {
+  id                     String   @id @default(uuid()) @db.Uuid
+  user_id                String   @db.Uuid
+  session_token_hash     String   @unique @db.Char(64)
+  native_auth_token_hash String   @db.Char(64)
+  expires_at             DateTime @db.Timestamptz(6)
+  last_seen_at           DateTime @default(now()) @db.Timestamptz(6)
+  revoked_at             DateTime? @db.Timestamptz(6)
+  user_agent             String?
+  ip_address             String?  @db.Inet
+  created_at             DateTime @default(now()) @db.Timestamptz(6)
+  user                   User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([expires_at])
+  @@map("wallet_sessions")
+}
+
+model Provider {
+  id                    String           @id @default(uuid()) @db.Uuid
+  user_id               String           @unique @db.Uuid
+  status                ProviderStatus   @default(pending)
+  slug                  String           @unique @db.VarChar(64)
+  display_name          String           @db.VarChar(120)
+  description           String?
+  website_url           String?
+  payout_wallet_address String           @db.VarChar(80)
+  approval_notes        String?
+  approved_at           DateTime?        @db.Timestamptz(6)
+  created_at            DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime         @updatedAt @db.Timestamptz(6)
+  user                  User             @relation("ProviderOwner", fields: [user_id], references: [id], onDelete: Cascade)
+  products              ProviderProduct[]
+  balance               ProviderBalance?
+  usageEvents           UsageEvent[]
+  settlementLines       SettlementLine[] @relation("SettlementLineProvider")
+  chainTxs              ChainTransaction[] @relation("ChainTxProvider")
+
+  @@index([status])
+  @@map("providers")
+}
+
+model ProviderProduct {
+  id                            String           @id @default(uuid()) @db.Uuid
+  provider_id                   String           @db.Uuid
+  status                        ProductStatus    @default(draft)
+  slug                          String           @unique @db.VarChar(64)
+  name                          String           @db.VarChar(120)
+  short_description             String           @db.VarChar(240)
+  description                   String?
+  base_url                      String
+  upstream_path_template        String           @db.VarChar(255)
+  upstream_method               HttpMethod
+  price_atomic                  Decimal          @db.Decimal(38, 0)
+  timeout_ms                    Int              @default(10000)
+  rate_limit_per_minute         Int              @default(60)
+  charge_policy                 ChargePolicy     @default(success_only)
+  origin_auth_mode              OriginAuthMode   @default(none)
+  origin_auth_header_name       String?          @db.VarChar(64)
+  origin_auth_secret_ciphertext String?
+  path_params_schema_json       Json             @default("{}")
+  input_schema_json             Json             @default("{}")
+  query_schema_json             Json             @default("{}")
+  output_schema_json            Json             @default("{}")
+  metadata_json                 Json             @default("{}")
+  created_at                    DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime         @updatedAt @db.Timestamptz(6)
+  provider                      Provider         @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+  grants                        ProjectProductGrant[]
+  reservations                  UsageReservation[]
+  usageEvents                   UsageEvent[]
+  idempotencyKeys               GatewayIdempotencyKey[]
+
+  @@index([provider_id])
+  @@index([status])
+  @@map("provider_products")
+}
+
+model BuyerProject {
+  id          String               @id @default(uuid()) @db.Uuid
+  user_id     String               @db.Uuid
+  name        String               @db.VarChar(120)
+  status      ProjectStatus        @default(active)
+  created_at  DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime             @updatedAt @db.Timestamptz(6)
+  user        User                 @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  apiKeys     ProjectApiKey[]
+  grants      ProjectProductGrant[]
+  reservations UsageReservation[]
+  usageEvents UsageEvent[]
+  idempotencyKeys GatewayIdempotencyKey[]
+
+  @@index([user_id])
+  @@index([status])
+  @@map("buyer_projects")
+}
+
+model ProjectApiKey {
+  id           String              @id @default(uuid()) @db.Uuid
+  project_id   String              @db.Uuid
+  name         String              @db.VarChar(120)
+  key_prefix   String              @unique @db.VarChar(16)
+  secret_hash  String              @unique @db.Char(64)
+  status       ApiKeyStatus        @default(active)
+  last_used_at DateTime?           @db.Timestamptz(6)
+  revoked_at   DateTime?           @db.Timestamptz(6)
+  created_at   DateTime            @default(now()) @db.Timestamptz(6)
+  project      BuyerProject        @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  idempotencyKeys GatewayIdempotencyKey[]
+  reservations UsageReservation[]
+  usageEvents  UsageEvent[]
+
+  @@index([project_id])
+  @@index([status])
+  @@map("project_api_keys")
+}
+
+model ProjectProductGrant {
+  id         String      @id @default(uuid()) @db.Uuid
+  project_id String      @db.Uuid
+  product_id String      @db.Uuid
+  status     GrantStatus @default(active)
+  created_at DateTime    @default(now()) @db.Timestamptz(6)
+  revoked_at DateTime?   @db.Timestamptz(6)
+  project    BuyerProject   @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  product    ProviderProduct @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  @@unique([project_id, product_id])
+  @@index([project_id])
+  @@index([product_id])
+  @@map("project_product_grants")
+}
+
+model BuyerBalance {
+  user_id                    String   @id @db.Uuid
+  asset_identifier           String   @db.VarChar(64)
+  onchain_confirmed_atomic   Decimal  @default(0) @db.Decimal(38, 0)
+  reserved_atomic            Decimal  @default(0) @db.Decimal(38, 0)
+  consumed_unsettled_atomic  Decimal  @default(0) @db.Decimal(38, 0)
+  updated_at                 DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  user                       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("buyer_balances")
+}
+
+model ProviderBalance {
+  provider_id              String   @id @db.Uuid
+  unsettled_earned_atomic  Decimal  @default(0) @db.Decimal(38, 0)
+  claimable_onchain_atomic Decimal  @default(0) @db.Decimal(38, 0)
+  claimed_total_atomic     Decimal  @default(0) @db.Decimal(38, 0)
+  updated_at               DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  provider                 Provider @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+
+  @@map("provider_balances")
+}
+
+model GatewayIdempotencyKey {
+  id                  String             @id @default(uuid()) @db.Uuid
+  project_id          String             @db.Uuid
+  product_id          String             @db.Uuid
+  api_key_id          String             @db.Uuid
+  idempotency_key     String             @db.VarChar(128)
+  request_hash        String             @db.Char(64)
+  status              IdempotencyStatus  @default(processing)
+  usage_receipt_id    String?            @unique @db.Uuid
+  response_cache_json Json?
+  created_at          DateTime           @default(now()) @db.Timestamptz(6)
+  expires_at          DateTime           @db.Timestamptz(6)
+  project             BuyerProject       @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  product             ProviderProduct    @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  apiKey              ProjectApiKey      @relation(fields: [api_key_id], references: [id], onDelete: Cascade)
+  usageReceipt        UsageReceipt?      @relation(fields: [usage_receipt_id], references: [id])
+
+  @@unique([project_id, product_id, idempotency_key])
+  @@map("gateway_idempotency_keys")
+}
+
+model UsageReservation {
+  id               String            @id @default(uuid()) @db.Uuid
+  gateway_request_id String          @unique @db.Uuid
+  project_id       String            @db.Uuid
+  product_id       String            @db.Uuid
+  api_key_id       String            @db.Uuid
+  buyer_user_id    String            @db.Uuid
+  amount_atomic    Decimal           @db.Decimal(38, 0)
+  status           ReservationStatus @default(reserved)
+  upstream_method  HttpMethod
+  upstream_path    String            @db.VarChar(255)
+  created_at       DateTime          @default(now()) @db.Timestamptz(6)
+  expires_at       DateTime          @db.Timestamptz(6)
+  finalized_at     DateTime?         @db.Timestamptz(6)
+  released_at      DateTime?         @db.Timestamptz(6)
+  project          BuyerProject      @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  product          ProviderProduct   @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  apiKey           ProjectApiKey     @relation(fields: [api_key_id], references: [id], onDelete: Cascade)
+  buyer            User              @relation("ReservationBuyer", fields: [buyer_user_id], references: [id], onDelete: Cascade)
+  usageEvent       UsageEvent?
+
+  @@index([buyer_user_id, status])
+  @@index([project_id])
+  @@map("usage_reservations")
+}
+
+model UsageEvent {
+  id                   String           @id @default(uuid()) @db.Uuid
+  reservation_id       String           @unique @db.Uuid
+  project_id           String           @db.Uuid
+  product_id           String           @db.Uuid
+  provider_id          String           @db.Uuid
+  api_key_id           String           @db.Uuid
+  buyer_user_id        String           @db.Uuid
+  amount_atomic        Decimal          @db.Decimal(38, 0)
+  request_status       UsageStatus
+  upstream_status_code Int?
+  upstream_latency_ms  Int?
+  request_bytes        Int?
+  response_bytes       Int?
+  charged              Boolean
+  settled_in_batch_id  String?          @db.Uuid
+  occurred_at          DateTime         @default(now()) @db.Timestamptz(6)
+  reservation          UsageReservation @relation(fields: [reservation_id], references: [id], onDelete: Cascade)
+  project              BuyerProject     @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  product              ProviderProduct  @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  provider             Provider         @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+  apiKey               ProjectApiKey    @relation(fields: [api_key_id], references: [id], onDelete: Cascade)
+  buyer                User             @relation("UsageEventBuyer", fields: [buyer_user_id], references: [id], onDelete: Cascade)
+  settlementBatch      SettlementBatch? @relation(fields: [settled_in_batch_id], references: [id], onDelete: SetNull)
+  usageReceipt         UsageReceipt?
+
+  @@index([provider_id])
+  @@index([buyer_user_id])
+  @@index([settled_in_batch_id])
+  @@map("usage_events")
+}
+
+model UsageReceipt {
+  id                    String                @id @default(uuid()) @db.Uuid
+  usage_event_id        String                @unique @db.Uuid
+  public_receipt_id     String                @unique @db.VarChar(40)
+  asset_identifier      String                @db.VarChar(64)
+  amount_atomic         Decimal               @db.Decimal(38, 0)
+  buyer_wallet_address  String                @db.VarChar(80)
+  provider_wallet_address String              @db.VarChar(80)
+  product_snapshot      Json
+  chain_batch_id        String?               @db.VarChar(128)
+  created_at            DateTime              @default(now()) @db.Timestamptz(6)
+  usageEvent            UsageEvent            @relation(fields: [usage_event_id], references: [id], onDelete: Cascade)
+  idempotencyKey        GatewayIdempotencyKey?
+
+  @@map("usage_receipts")
+}
+
+model SettlementBatch {
+  id                           String                @id @default(uuid()) @db.Uuid
+  batch_id                     String                @unique @db.VarChar(128)
+  status                       SettlementBatchStatus @default(prepared)
+  asset_identifier             String                @db.VarChar(64)
+  window_started_at            DateTime              @db.Timestamptz(6)
+  window_ended_at              DateTime              @db.Timestamptz(6)
+  total_buyer_debits_atomic    Decimal               @db.Decimal(38, 0)
+  total_provider_credits_atomic Decimal              @db.Decimal(38, 0)
+  platform_fee_atomic          Decimal               @db.Decimal(38, 0)
+  line_count                   Int
+  tx_hash                      String?               @db.VarChar(80)
+  created_at                   DateTime              @default(now()) @db.Timestamptz(6)
+  submitted_at                 DateTime?             @db.Timestamptz(6)
+  confirmed_at                 DateTime?             @db.Timestamptz(6)
+  failed_at                    DateTime?             @db.Timestamptz(6)
+  lines                        SettlementLine[]
+  usageEvents                  UsageEvent[]
+  chainTransactions            ChainTransaction[]    @relation("ChainTxBatch")
+
+  @@index([status])
+  @@map("settlement_batches")
+}
+
+model SettlementLine {
+  id                       String             @id @default(uuid()) @db.Uuid
+  batch_ref                String             @db.Uuid
+  line_type                SettlementLineType
+  buyer_user_id            String?            @db.Uuid
+  provider_id              String?            @db.Uuid
+  amount_atomic            Decimal            @db.Decimal(38, 0)
+  source_usage_event_count Int                @default(0)
+  created_at               DateTime           @default(now()) @db.Timestamptz(6)
+  batch                    SettlementBatch    @relation(fields: [batch_ref], references: [id], onDelete: Cascade)
+  buyer                    User?              @relation("SettlementLineBuyer", fields: [buyer_user_id], references: [id], onDelete: Cascade)
+  provider                 Provider?          @relation("SettlementLineProvider", fields: [provider_id], references: [id], onDelete: Cascade)
+
+  @@index([batch_ref])
+  @@map("settlement_lines")
+}
+
+model ChainTransaction {
+  id                 String           @id @default(uuid()) @db.Uuid
+  tx_hash            String           @unique @db.VarChar(80)
+  tx_kind            ChainTxKind
+  status             ChainTxStatus
+  wallet_address     String           @db.VarChar(80)
+  related_user_id    String?          @db.Uuid
+  related_provider_id String?         @db.Uuid
+  related_batch_id   String?          @db.Uuid
+  amount_atomic      Decimal?         @db.Decimal(38, 0)
+  nonce              BigInt?          @db.BigInt
+  block_nonce        BigInt?          @db.BigInt
+  raw_response_json  Json?
+  created_at         DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime         @updatedAt @db.Timestamptz(6)
+  confirmed_at       DateTime?        @db.Timestamptz(6)
+  relatedUser        User?            @relation("ChainTxUser", fields: [related_user_id], references: [id], onDelete: SetNull)
+  relatedProvider    Provider?        @relation("ChainTxProvider", fields: [related_provider_id], references: [id], onDelete: SetNull)
+  relatedBatch       SettlementBatch? @relation("ChainTxBatch", fields: [related_batch_id], references: [id], onDelete: SetNull)
+
+  @@index([related_user_id])
+  @@index([related_provider_id])
+  @@index([related_batch_id])
+  @@map("chain_transactions")
+}
+
+model AdminAuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  actor_user_id String   @db.Uuid
+  action        String   @db.VarChar(80)
+  entity_type   String   @db.VarChar(40)
+  entity_id     String?  @db.Uuid
+  payload_json  Json     @default("{}")
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  actor         User     @relation(fields: [actor_user_id], references: [id], onDelete: Cascade)
+
+  @@map("admin_audit_logs")
+}

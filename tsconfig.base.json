@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@mx402/config": [
+        "packages/config/src/index.ts"
+      ],
+      "@mx402/db": [
+        "packages/db/src/index.ts"
+      ],
+      "@mx402/domain": [
+        "packages/domain/src/index.ts"
+      ],
+      "@mx402/gateway-sdk": [
+        "packages/gateway-sdk/src/index.ts"
+      ],
+      "@mx402/multiversx": [
+        "packages/multiversx/src/index.ts"
+      ],
+      "@mx402/observability": [
+        "packages/observability/src/index.ts"
+      ],
+      "@mx402/provider-sdk": [
+        "packages/provider-sdk/src/index.ts"
+      ]
+    },
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "noEmitOnError": true,
+    "outDir": "dist"
+  }
+}
