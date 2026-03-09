@@ -13,8 +13,8 @@ import type {
   WalletTransaction
 } from './types';
 
-const CHAIN_STATUS_API_BASE = 'https://api.multiversx.com';
 const WALLET_CHAIN_API_BASE = process.env.NEXT_PUBLIC_MULTIVERSX_API_URL ?? 'https://devnet-api.multiversx.com';
+const CHAIN_STATUS_API_BASE = WALLET_CHAIN_API_BASE;
 const INTERNAL_API_PROXY_PATH = '/__mx402_api';
 const GATEWAY_PROXY_PATH = '/__mx402_gateway';
 

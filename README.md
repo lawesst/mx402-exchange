@@ -43,3 +43,19 @@ MULTIVERSX_CHAIN_API_KEY=...
 ```
 
 The worker uses the optional chain-read endpoints first and sends the key as an `Api-Key` header.
+
+## Devnet Execution
+- Build and deploy the ledger contract:
+  - `npm run deploy:devnet:ledger`
+- Run the real devnet flow against a local API/gateway plus a real MultiversX Devnet contract:
+  - `npm run scenario:devnet:real`
+
+Required environment for a real devnet run:
+- `MX402_OWNER_PRIVATE_KEY`
+- `MX402_PROVIDER_PRIVATE_KEY`
+- `MX402_BUYER_PRIVATE_KEY`
+- `MX402_LEDGER_CONTRACT` if the contract is already deployed
+
+Notes:
+- The ledger deploy script writes `MX402_LEDGER_CONTRACT`, `MX402_ASSET_IDENTIFIER`, and `MX402_LEDGER_FEE_BPS` into `.env.local` unless `--no-write-env` is passed.
+- The contract meta build must run from `contracts/mx402-ledger/meta`, because the MultiversX meta tool resolves `../Cargo.toml` relative to the current working directory.

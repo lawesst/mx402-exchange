@@ -16,7 +16,9 @@
     "lint": "npm run lint --workspaces --if-present",
     "prisma:generate": "npm run prisma:generate --workspace @mx402/db",
     "seed:demo": "tsx scripts/seed-demo.ts",
+    "deploy:devnet:ledger": "tsx scripts/deploy-devnet-ledger.ts",
     "scenario:e2e": "npm run build && tsx scripts/e2e-local.ts",
+    "scenario:devnet:real": "npm run build && tsx scripts/devnet-real-scenario.ts",
     "sync:deposits": "npm run sync:deposits --workspace @mx402/worker",
     "test:devnet:tx": "tsx scripts/test-devnet-tx.ts"
   },

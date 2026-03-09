@@ -8,9 +8,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
-    "sync:deposits": "tsx src/index.ts --once"
+    "sync:deposits": "tsx src/index.ts --once",
+    "sync:settlements": "tsx src/index.ts --once"
   },
   "dependencies": {
+    "@multiversx/sdk-core": "^15.4.0",
     "@mx402/config": "file:../../packages/config",
     "@mx402/db": "file:../../packages/db",
     "@mx402/observability": "file:../../packages/observability",

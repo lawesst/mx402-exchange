@@ -4,14 +4,14 @@ multiversx_sc::imports!();
 multiversx_sc::derive_imports!();
 
 #[type_abi]
-#[derive(TopEncode, TopDecode, NestedEncode, NestedDecode)]
+#[derive(ManagedVecItem, TopEncode, TopDecode, NestedEncode, NestedDecode)]
 pub struct BuyerDebit<M: ManagedTypeApi> {
     pub buyer: ManagedAddress<M>,
     pub amount: BigUint<M>,
 }
 
 #[type_abi]
-#[derive(TopEncode, TopDecode, NestedEncode, NestedDecode)]
+#[derive(ManagedVecItem, TopEncode, TopDecode, NestedEncode, NestedDecode)]
 pub struct ProviderCredit<M: ManagedTypeApi> {
     pub provider_id: ManagedBuffer<M>,
     pub amount: BigUint<M>,
@@ -26,6 +26,21 @@ pub struct Config<M: ManagedTypeApi> {
     pub owner: ManagedAddress<M>,
     pub operator: ManagedAddress<M>,
     pub treasury_address: ManagedAddress<M>,
+}
+
+#[type_abi]
+#[derive(TopEncode, TopDecode, NestedEncode, NestedDecode)]
+pub struct SettlementBatchApplied<M: ManagedTypeApi> {
+    pub total_buyer_debits: BigUint<M>,
+    pub total_provider_credits: BigUint<M>,
+    pub fee_amount: BigUint<M>,
+}
+
+#[type_abi]
+#[derive(TopEncode, TopDecode, NestedEncode, NestedDecode)]
+pub struct ProviderClaimed<M: ManagedTypeApi> {
+    pub payout_address: ManagedAddress<M>,
+    pub amount: BigUint<M>,
 }
 
 #[multiversx_sc::contract]
@@ -106,8 +121,8 @@ pub trait Mx402LedgerContract {
     fn apply_settlement_batch(
         &self,
         batch_id: ManagedBuffer,
-        buyer_debits: MultiValueEncoded<BuyerDebit<Self::Api>>,
-        provider_credits: MultiValueEncoded<ProviderCredit<Self::Api>>,
+        buyer_debits: ManagedVec<Self::Api, BuyerDebit<Self::Api>>,
+        provider_credits: ManagedVec<Self::Api, ProviderCredit<Self::Api>>,
         fee_amount: BigUint,
     ) {
         self.require_not_paused();
@@ -118,38 +133,49 @@ pub trait Mx402LedgerContract {
         let mut total_buyer_debits = BigUint::zero();
         let mut total_provider_credits = BigUint::zero();
 
-        for debit in buyer_debits {
+        for debit in buyer_debits.into_iter() {
             require!(debit.amount > 0u32, "buyer debit must be positive");
+            let amount = debit.amount;
             self.buyer_balance(&debit.buyer).update(|balance| {
-                require!(*balance >= debit.amount, "buyer balance too low");
-                *balance -= &debit.amount;
+                require!(*balance >= amount, "buyer balance too low");
+                *balance -= &amount;
             });
-            total_buyer_debits += debit.amount;
+            total_buyer_debits += amount;
         }
 
-        for credit in provider_credits {
+        for credit in provider_credits.into_iter() {
             require!(credit.amount > 0u32, "provider credit must be positive");
             require!(
                 !self.provider_payout_address(&credit.provider_id).is_empty(),
                 "provider not registered"
             );
 
+            let amount = credit.amount;
             self.provider_claimable(&credit.provider_id)
-                .update(|claimable| *claimable += &credit.amount);
-            total_provider_credits += credit.amount;
+                .update(|claimable| *claimable += &amount);
+            total_provider_credits += amount;
         }
 
         require!(
-            total_buyer_debits == total_provider_credits + &fee_amount,
+            total_buyer_debits == total_provider_credits.clone() + &fee_amount,
             "batch totals mismatch"
         );
 
+        if fee_amount > 0u32 {
+            let token = self.supported_token_id().get();
+            let treasury_address = self.treasury_address().get();
+            self.send().direct(&treasury_address, &token, 0, &fee_amount);
+        }
+
         self.processed_batch(&batch_id).set(true);
+        let event_payload = SettlementBatchApplied {
+            total_buyer_debits,
+            total_provider_credits,
+            fee_amount,
+        };
         self.settlement_batch_applied_event(
             &batch_id,
-            &total_buyer_debits,
-            &total_provider_credits,
-            &fee_amount,
+            &event_payload,
         );
     }
 
@@ -179,7 +205,11 @@ pub trait Mx402LedgerContract {
 
         let token = self.supported_token_id().get();
         self.send().direct(&caller, &token, 0, &amount);
-        self.provider_claimed_event(&provider_id, &caller, &amount);
+        let event_payload = ProviderClaimed {
+            payout_address: caller,
+            amount,
+        };
+        self.provider_claimed_event(&provider_id, &event_payload);
     }
 
     #[only_owner]
@@ -225,6 +255,16 @@ pub trait Mx402LedgerContract {
         }
     }
 
+    #[view(hasProvider)]
+    fn has_provider(&self, provider_id: ManagedBuffer) -> bool {
+        !self.provider_payout_address(&provider_id).is_empty()
+    }
+
+    #[view(getFeeBps)]
+    fn get_fee_bps(&self) -> u16 {
+        self.fee_bps().get()
+    }
+
     fn require_operator(&self) {
         require!(
             self.blockchain().get_caller() == self.operator().get(),
@@ -260,17 +300,14 @@ pub trait Mx402LedgerContract {
     fn settlement_batch_applied_event(
         &self,
         #[indexed] batch_id: &ManagedBuffer,
-        total_buyer_debits: &BigUint,
-        total_provider_credits: &BigUint,
-        fee_amount: &BigUint,
+        batch: &SettlementBatchApplied<Self::Api>,
     );
 
     #[event("provider_claimed")]
     fn provider_claimed_event(
         &self,
         #[indexed] provider_id: &ManagedBuffer,
-        payout_address: &ManagedAddress,
-        amount: &BigUint,
+        claim: &ProviderClaimed<Self::Api>,
     );
 
     #[view(getBuyerBalance)]

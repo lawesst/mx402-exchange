@@ -16,13 +16,15 @@ const navigation = [
 ];
 
 function resolveNetworkLabel() {
-  const apiUrl = process.env.NEXT_PUBLIC_MULTIVERSX_API_URL ?? '';
+  const environment = (process.env.NEXT_PUBLIC_MULTIVERSX_ENV ?? '').toLowerCase();
+  const chainId = (process.env.NEXT_PUBLIC_MULTIVERSX_CHAIN_ID ?? '').toLowerCase();
+  const apiUrl = (process.env.NEXT_PUBLIC_MULTIVERSX_API_URL ?? '').toLowerCase();
 
-  if (apiUrl.includes('devnet')) {
+  if (environment === 'devnet' || chainId === 'd' || apiUrl.includes('devnet')) {
     return 'MultiversX Devnet';
   }
 
-  if (apiUrl.includes('testnet')) {
+  if (environment === 'testnet' || chainId === 't' || apiUrl.includes('testnet')) {
     return 'MultiversX Testnet';
   }
 

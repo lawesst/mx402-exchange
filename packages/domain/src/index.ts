@@ -103,6 +103,15 @@ export const trackDepositSchema = z.object({
   amountAtomic: amountSchema.optional()
 });
 
+export const prepareProviderClaimSchema = z.object({
+  amountAtomic: amountSchema.optional()
+});
+
+export const trackProviderClaimSchema = z.object({
+  txHash: z.string().min(10).max(80),
+  amountAtomic: amountSchema
+});
+
 export const gatewayCallSchema = z.object({
   pathParams: z.record(z.string()).default({}),
   query: z.record(z.union([z.string(), z.number(), z.boolean()])).default({}),
@@ -148,3 +157,5 @@ export type CreateGrantInput = z.infer<typeof createGrantSchema>;
 export type GatewayCallInput = z.infer<typeof gatewayCallSchema>;
 export type NativeAuthLoginInput = z.infer<typeof nativeAuthLoginSchema>;
 export type TrackDepositInput = z.infer<typeof trackDepositSchema>;
+export type PrepareProviderClaimInput = z.infer<typeof prepareProviderClaimSchema>;
+export type TrackProviderClaimInput = z.infer<typeof trackProviderClaimSchema>;

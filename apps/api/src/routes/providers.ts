@@ -1,9 +1,19 @@
 import type { FastifyInstance } from "fastify";
 
 import { Prisma, getPrismaClient } from "@mx402/db";
-import { createProductSchema, createProviderSchema, updateProductSchema, updateProviderSchema } from "@mx402/domain";
+import { loadSharedRuntimeConfig, requireEnv } from "@mx402/config";
+import {
+  createProductSchema,
+  createProviderSchema,
+  prepareProviderClaimSchema,
+  trackProviderClaimSchema,
+  updateProductSchema,
+  updateProviderSchema
+} from "@mx402/domain";
+import { prepareClaimProviderEarningsCall } from "@mx402/multiversx";
 
 import { requireSession } from "../auth.js";
+import { trackProviderClaimTransaction } from "../deposits.js";
 
 function serializeProvider(provider: {
   id: string;
@@ -474,11 +484,111 @@ export async function registerProviderRoutes(app: FastifyInstance) {
   });
 
   app.post("/v1/providers/me/claim/prepare", async (_request, reply) => {
-    return reply.code(501).send({
-      error: {
-        code: "NOT_IMPLEMENTED",
-        message: "Provider claim transaction preparation is not implemented yet"
+    const auth = await requireSession(_request, reply);
+    if (!auth) {
+      return reply;
+    }
+
+    const input = prepareProviderClaimSchema.parse(_request.body ?? {});
+    const prisma = getPrismaClient();
+    const provider = await prisma.provider.findUnique({
+      where: {
+        user_id: auth.userId
+      },
+      include: {
+        balance: true
       }
+    });
+
+    if (!provider) {
+      return reply.code(404).send({
+        error: {
+          code: "NOT_FOUND",
+          message: "Provider profile not found"
+        }
+      });
+    }
+
+    if (provider.payout_wallet_address !== auth.walletAddress) {
+      return reply.code(409).send({
+        error: {
+          code: "PAYOUT_WALLET_MISMATCH",
+          message: "Connect the configured payout wallet to claim provider earnings"
+        }
+      });
+    }
+
+    const claimableAtomic = BigInt(provider.balance?.claimable_onchain_atomic.toString() ?? "0");
+    if (claimableAtomic <= 0n) {
+      return reply.code(409).send({
+        error: {
+          code: "NO_CLAIMABLE_BALANCE",
+          message: "Provider has no claimable on-chain balance"
+        }
+      });
+    }
+
+    const requestedAmountAtomic = input.amountAtomic ? BigInt(input.amountAtomic) : claimableAtomic;
+    if (requestedAmountAtomic <= 0n || requestedAmountAtomic > claimableAtomic) {
+      return reply.code(402).send({
+        error: {
+          code: "INVALID_CLAIM_AMOUNT",
+          message: "Claim amount exceeds provider claimable balance",
+          requestedAtomic: requestedAmountAtomic.toString(),
+          claimableAtomic: claimableAtomic.toString()
+        }
+      });
+    }
+
+    const runtimeConfig = loadSharedRuntimeConfig();
+
+    return reply.code(200).send({
+      ...prepareClaimProviderEarningsCall({
+        contractAddress: requireEnv("MX402_LEDGER_CONTRACT"),
+        chainId: runtimeConfig.chainId,
+        providerId: provider.id,
+        amountAtomic: requestedAmountAtomic.toString()
+      }),
+      providerId: provider.id,
+      payoutWalletAddress: provider.payout_wallet_address,
+      claimableAtomic: claimableAtomic.toString()
+    });
+  });
+
+  app.post("/v1/providers/me/claim/track", async (request, reply) => {
+    const auth = await requireSession(request, reply);
+    if (!auth) {
+      return reply;
+    }
+
+    const input = trackProviderClaimSchema.parse(request.body);
+    const prisma = getPrismaClient();
+    const provider = await prisma.provider.findUnique({
+      where: {
+        user_id: auth.userId
+      }
+    });
+
+    if (!provider) {
+      return reply.code(404).send({
+        error: {
+          code: "NOT_FOUND",
+          message: "Provider profile not found"
+        }
+      });
+    }
+
+    const tracked = await trackProviderClaimTransaction({
+      txHash: input.txHash,
+      walletAddress: auth.walletAddress,
+      providerId: provider.id,
+      amountAtomic: input.amountAtomic
+    });
+
+    return reply.code(202).send({
+      txHash: tracked.tx_hash,
+      status: tracked.status,
+      txKind: tracked.tx_kind
     });
   });
 }

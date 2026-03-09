@@ -1,8 +1,10 @@
 import { optionalEnv } from "@mx402/config";
 import { createLogger } from "@mx402/observability";
 
+import { confirmSubmittedProviderClaims } from "./claims.js";
 import { syncTrackedDeposits } from "./deposits.js";
 import { jobNames } from "./jobs/index.js";
+import { runSettlementCycle } from "./settlements.js";
 
 const logger = createLogger("worker");
 
@@ -19,8 +21,14 @@ async function main() {
 
     inFlight = true;
     try {
-      const result = await syncTrackedDeposits(logger);
-      logger.info("Deposit sync completed", result);
+      const depositResult = await syncTrackedDeposits(logger);
+      const settlementResult = await runSettlementCycle(logger);
+      const claimResult = await confirmSubmittedProviderClaims(logger);
+      logger.info("Worker sync completed", {
+        depositResult,
+        settlementResult,
+        claimResult
+      });
     } finally {
       inFlight = false;
     }

@@ -13,3 +13,7 @@ coverage
 .prisma
 node_modules.bak
 apps/web/certificates
+contracts/**/target
+contracts/**/output
+contracts/**/Cargo.lock
+contracts/**/wasm/src

@@ -22,6 +22,10 @@ function bigintToHex(value: bigint | string): string {
 }
 
 function buildDepositData(input: { tokenIdentifier: string; amountAtomic: string }) {
+  if (input.tokenIdentifier === "EGLD") {
+    return "deposit";
+  }
+
   return ["ESDTTransfer", asciiToHex(input.tokenIdentifier), bigintToHex(input.amountAtomic), asciiToHex("deposit")].join(
     "@"
   );
@@ -31,12 +35,27 @@ function buildWithdrawData(input: { amountAtomic: string }) {
   return ["withdraw", bigintToHex(input.amountAtomic)].join("@");
 }
 
+function buildClaimProviderEarningsData(input: {
+  providerId: string;
+  amountAtomic?: string | null;
+}) {
+  const args = ["claimProviderEarnings", asciiToHex(input.providerId)];
+
+  if (input.amountAtomic && BigInt(input.amountAtomic) > 0n) {
+    args.push(bigintToHex(input.amountAtomic));
+  }
+
+  return args.join("@");
+}
+
 export function prepareDepositCall(input: {
   contractAddress: string;
   chainId: string;
   tokenIdentifier: string;
   amountAtomic: string;
 }): PreparedTransactionCall {
+  const isEgld = input.tokenIdentifier === "EGLD";
+
   return {
     receiver: input.contractAddress,
     chainId: input.chainId,
@@ -45,12 +64,12 @@ export function prepareDepositCall(input: {
       tokenIdentifier: input.tokenIdentifier,
       amountAtomic: input.amountAtomic
     }),
-    value: "0",
+    value: isEgld ? input.amountAtomic : "0",
     gasPrice: 1_000_000_000,
     version: 2,
     tokenIdentifier: input.tokenIdentifier,
     amountAtomic: input.amountAtomic,
-    gasLimit: 12_000_000
+    gasLimit: isEgld ? 20_000_000 : 12_000_000
   };
 }
 
@@ -70,5 +89,28 @@ export function prepareWithdrawCall(input: {
     amountAtomic: input.amountAtomic,
     gasLimit: 12_000_000,
     arguments: [input.amountAtomic]
+  };
+}
+
+export function prepareClaimProviderEarningsCall(input: {
+  contractAddress: string;
+  chainId: string;
+  providerId: string;
+  amountAtomic?: string | null;
+}): PreparedTransactionCall {
+  return {
+    receiver: input.contractAddress,
+    chainId: input.chainId,
+    function: "claimProviderEarnings",
+    data: buildClaimProviderEarningsData({
+      providerId: input.providerId,
+      amountAtomic: input.amountAtomic
+    }),
+    value: "0",
+    gasPrice: 1_000_000_000,
+    version: 2,
+    amountAtomic: input.amountAtomic ?? undefined,
+    gasLimit: 25_000_000,
+    arguments: input.amountAtomic ? [input.providerId, input.amountAtomic] : [input.providerId]
   };
 }
