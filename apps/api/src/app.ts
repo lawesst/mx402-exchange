@@ -1,6 +1,8 @@
+import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import Fastify from "fastify";
 
+import { optionalEnv } from "@mx402/config";
 import { createLogger } from "@mx402/observability";
 import { ZodError } from "zod";
 
@@ -13,12 +15,62 @@ import { registerProjectRoutes } from "./routes/projects.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerUsageRoutes } from "./routes/usage.js";
 
+function isAllowedOrigin(origin: string, allowedOrigins: string[]): boolean {
+  if (allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
+    return true;
+  }
+
+  let parsedOrigin: URL;
+  try {
+    parsedOrigin = new URL(origin);
+  } catch {
+    return false;
+  }
+
+  const normalizedLoopbackHost =
+    parsedOrigin.hostname === "127.0.0.1" ? "localhost" : parsedOrigin.hostname;
+
+  return allowedOrigins.some((allowedOrigin) => {
+    let parsedAllowedOrigin: URL;
+    try {
+      parsedAllowedOrigin = new URL(allowedOrigin);
+    } catch {
+      return false;
+    }
+
+    const normalizedAllowedHost =
+      parsedAllowedOrigin.hostname === "127.0.0.1" ? "localhost" : parsedAllowedOrigin.hostname;
+
+    return (
+      parsedOrigin.protocol === parsedAllowedOrigin.protocol &&
+      normalizedLoopbackHost === normalizedAllowedHost &&
+      parsedOrigin.port === parsedAllowedOrigin.port
+    );
+  });
+}
+
 export function buildApp() {
   const logger = createLogger("api");
   const app = Fastify();
+  const allowedOrigins = optionalEnv("MX402_WEB_ORIGIN", "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
   app.register(cookie, {
     secret: process.env.SESSION_SIGNING_SECRET
+  });
+
+  app.register(cors, {
+    credentials: true,
+    origin(origin, callback) {
+      if (!origin || isAllowedOrigin(origin, allowedOrigins)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Origin not allowed"), false);
+    }
   });
 
   app.decorateRequest("auth", null);

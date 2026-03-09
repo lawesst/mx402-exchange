@@ -3,14 +3,31 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next build",
-    "dev": "next dev",
-    "start": "next start"
+    "build": "MX402_NEXT_DIST_DIR=.next-build NEXT_IGNORE_INCORRECT_LOCKFILE=1 next build",
+    "dev": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next dev --experimental-https --experimental-https-key ./certificates/localhost-key.pem --experimental-https-cert ./certificates/localhost.pem",
+    "start": "MX402_NEXT_DIST_DIR=.next-build next start"
   },
   "dependencies": {
+    "@multiversx/sdk-core": "^15.4.0",
     "@multiversx/sdk-dapp": "^5.0.0",
+    "@multiversx/sdk-dapp-ui": "^0.1.23",
+    "@mx402/multiversx": "file:../../packages/multiversx",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@tanstack/react-query": "^5.90.21",
+    "bignumber.js": "^9.3.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.35.2",
+    "lodash.isempty": "^4.4.0",
     "next": "14.2.35",
     "react": "18.2.0",
-    "react-dom": "18.2.0"
+    "react-dom": "18.2.0",
+    "recharts": "^3.8.0",
+    "rxjs": "^7.8.2",
+    "zustand": "^4.4.7"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.27",
+    "postcss": "^8.4.31",
+    "tailwindcss": "^3.4.17"
   }
 }

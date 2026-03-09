@@ -10,6 +10,8 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
+    "@mx402/config": "file:../../packages/config",
+    "@mx402/db": "file:../../packages/db",
     "@mx402/domain": "file:../../packages/domain",
     "@mx402/observability": "file:../../packages/observability",
     "fastify": "^5.2.1"

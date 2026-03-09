@@ -12,16 +12,8 @@ export const prepareDepositSchema = z.object({
 });
 
 export const nativeAuthLoginSchema = z.object({
-  nativeAuthToken: z.string().min(1).optional(),
-  walletAddress: z.string().regex(/^erd1[0-9a-z]+$/i).optional(),
+  nativeAuthToken: z.string().min(1),
   displayName: z.string().min(1).max(80).optional()
-}).superRefine((value, ctx) => {
-  if (!value.nativeAuthToken && !value.walletAddress) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Either nativeAuthToken or walletAddress must be provided"
-    });
-  }
 });
 
 export const createProviderSchema = z.object({
@@ -32,7 +24,16 @@ export const createProviderSchema = z.object({
   payoutWalletAddress: z.string().min(8).max(80)
 });
 
-export const createProductSchema = z.object({
+export const updateProviderSchema = createProviderSchema.partial().superRefine((value, ctx) => {
+  if (Object.keys(value).length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "At least one provider field must be provided"
+    });
+  }
+});
+
+const productSchemaBase = z.object({
   slug: z.string().min(3).max(64).regex(/^[a-z0-9-]+$/),
   name: z.string().min(2).max(120),
   shortDescription: z.string().min(2).max(240),
@@ -50,7 +51,9 @@ export const createProductSchema = z.object({
   inputSchemaJson: z.record(z.unknown()).default({}),
   querySchemaJson: z.record(z.unknown()).default({}),
   outputSchemaJson: z.record(z.unknown()).default({})
-}).superRefine((value, ctx) => {
+});
+
+export const createProductSchema = productSchemaBase.superRefine((value, ctx) => {
   if (value.originAuthMode === "static_header") {
     if (!value.originAuthHeaderName || !value.originAuthSecret) {
       ctx.addIssue({
@@ -59,6 +62,28 @@ export const createProductSchema = z.object({
       });
     }
   }
+});
+
+export const updateProductSchema = productSchemaBase.partial().superRefine((value, ctx) => {
+  if (Object.keys(value).length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "At least one product field must be provided"
+    });
+  }
+
+  if (value.originAuthMode === "static_header") {
+    if (!value.originAuthHeaderName || !value.originAuthSecret) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Static header auth requires both header name and secret"
+      });
+    }
+  }
+});
+
+export const adminNotesSchema = z.object({
+  notes: z.string().min(1).max(2000).optional()
 });
 
 export const createProjectSchema = z.object({
@@ -114,7 +139,9 @@ export function computeSpendableAtomic(input: {
 }
 
 export type CreateProviderInput = z.infer<typeof createProviderSchema>;
+export type UpdateProviderInput = z.infer<typeof updateProviderSchema>;
 export type CreateProductInput = z.infer<typeof createProductSchema>;
+export type UpdateProductInput = z.infer<typeof updateProductSchema>;
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 export type CreateApiKeyInput = z.infer<typeof createApiKeySchema>;
 export type CreateGrantInput = z.infer<typeof createGrantSchema>;

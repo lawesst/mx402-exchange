@@ -15,7 +15,10 @@
     "dev:web": "npm run dev --workspace @mx402/web",
     "lint": "npm run lint --workspaces --if-present",
     "prisma:generate": "npm run prisma:generate --workspace @mx402/db",
-    "sync:deposits": "npm run sync:deposits --workspace @mx402/worker"
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "scenario:e2e": "npm run build && tsx scripts/e2e-local.ts",
+    "sync:deposits": "npm run sync:deposits --workspace @mx402/worker",
+    "test:devnet:tx": "tsx scripts/test-devnet-tx.ts"
   },
   "overrides": {
     "react": "18.2.0",
@@ -23,6 +26,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }

@@ -4,15 +4,15 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { getPrismaClient } from "@mx402/db";
 import { loadSharedRuntimeConfig, optionalEnv } from "@mx402/config";
+import { Address } from "@multiversx/sdk-core";
 import { NativeAuthServer } from "@multiversx/sdk-native-auth-server";
 
 const SESSION_COOKIE_NAME = "mx402_session";
 const SESSION_TTL_SECONDS = Number(optionalEnv("SESSION_TTL_SECONDS", "604800"));
-const NATIVE_AUTH_SKIP_VERIFY = optionalEnv("NATIVE_AUTH_SKIP_VERIFY", "false") === "true";
 
 type LoginIdentity = {
   walletAddress: string;
-  authMode: "native-auth" | "development-bypass";
+  authMode: "native-auth";
   nativeAuthToken: string | null;
 };
 
@@ -20,8 +20,23 @@ type NativeAuthValidationResult = {
   address?: string;
 };
 
+type NativeAuthDecodedResult = {
+  address: string;
+  body: string;
+  signature: string;
+  origin: string;
+  ttl: number;
+};
+
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function getBootstrapAdminWallets() {
+  return optionalEnv("MX402_BOOTSTRAP_ADMIN_WALLETS", "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 function getNativeAuthServer() {
@@ -39,32 +54,86 @@ function getNativeAuthServer() {
   });
 }
 
+function allowInsecureNativeAuthDevFallback() {
+  const fallback = optionalEnv("MX402_ENV", "development") === "development" ? "true" : "false";
+  return optionalEnv("NATIVE_AUTH_DEV_ALLOW_BLOCK_HASH_BYPASS", fallback) === "true";
+}
+
 function isWalletAddress(value: string): boolean {
   return /^erd1[0-9a-z]+$/i.test(value);
 }
 
+async function resolveLoginIdentityWithDevFallback(
+  server: NativeAuthServer,
+  nativeAuthToken: string
+): Promise<LoginIdentity> {
+  const fallbackServer = server as any as {
+    config: {
+      maxExpirySeconds: number;
+      skipLegacyValidation?: boolean;
+    };
+    decode: (token: string) => NativeAuthDecodedResult;
+    isOriginAccepted: (origin: string) => Promise<boolean>;
+    verifySignature: (address: Address, message: string, signature: Buffer) => Promise<boolean>;
+  };
+
+  const decoded = fallbackServer.decode(nativeAuthToken);
+
+  if (!decoded.address || !isWalletAddress(decoded.address)) {
+    throw new Error("Native Auth validation did not return a valid wallet address");
+  }
+
+  if (decoded.ttl > fallbackServer.config.maxExpirySeconds) {
+    throw new Error("Native Auth token TTL exceeds server limits");
+  }
+
+  const isAcceptedOrigin = await fallbackServer.isOriginAccepted(decoded.origin);
+  if (!isAcceptedOrigin) {
+    throw new Error("Native Auth token origin is not accepted");
+  }
+
+  const address = new Address(decoded.address);
+  const signature = Buffer.from(decoded.signature, "hex");
+  const signedMessage = `${decoded.address}${decoded.body}`;
+  let isValidSignature = await fallbackServer.verifySignature(address, signedMessage, signature);
+
+  if (!isValidSignature && !fallbackServer.config.skipLegacyValidation) {
+    const legacySignedMessage = `${decoded.address}${decoded.body}{}`;
+    isValidSignature = await fallbackServer.verifySignature(address, legacySignedMessage, signature);
+  }
+
+  if (!isValidSignature) {
+    throw new Error("Native Auth signature validation failed");
+  }
+
+  console.warn("[mx402] Using development Native Auth fallback: skipping block hash validation");
+
+  return {
+    walletAddress: decoded.address,
+    authMode: "native-auth",
+    nativeAuthToken
+  };
+}
+
 export async function resolveLoginIdentity(input: {
-  nativeAuthToken?: string;
-  walletAddress?: string;
+  nativeAuthToken: string;
 }): Promise<LoginIdentity> {
-  if (NATIVE_AUTH_SKIP_VERIFY) {
-    if (!input.walletAddress || !isWalletAddress(input.walletAddress)) {
-      throw new Error("walletAddress is required when NATIVE_AUTH_SKIP_VERIFY=true");
+  const server = getNativeAuthServer();
+  let validated: NativeAuthValidationResult;
+
+  try {
+    validated = await server.validate(input.nativeAuthToken) as NativeAuthValidationResult;
+  } catch (error) {
+    if (
+      allowInsecureNativeAuthDevFallback() &&
+      error instanceof Error &&
+      error.message === "Invalid block hash"
+    ) {
+      return resolveLoginIdentityWithDevFallback(server, input.nativeAuthToken);
     }
 
-    return {
-      walletAddress: input.walletAddress,
-      authMode: "development-bypass",
-      nativeAuthToken: input.nativeAuthToken ?? null
-    };
+    throw error;
   }
-
-  if (!input.nativeAuthToken) {
-    throw new Error("nativeAuthToken is required");
-  }
-
-  const server = getNativeAuthServer();
-  const validated = await server.validate(input.nativeAuthToken) as NativeAuthValidationResult;
 
   if (!validated.address || !isWalletAddress(validated.address)) {
     throw new Error("Native Auth validation did not return a valid wallet address");
@@ -92,11 +161,13 @@ export async function createSession(input: {
       wallet_address: input.walletAddress
     },
     update: {
-      display_name: input.displayName ?? undefined
+      display_name: input.displayName ?? undefined,
+      is_admin: getBootstrapAdminWallets().includes(input.walletAddress) ? true : undefined
     },
     create: {
       wallet_address: input.walletAddress,
-      display_name: input.displayName ?? null
+      display_name: input.displayName ?? null,
+      is_admin: getBootstrapAdminWallets().includes(input.walletAddress)
     }
   });
 
@@ -195,6 +266,26 @@ export async function requireSession(request: FastifyRequest, reply: FastifyRepl
       error: {
         code: "UNAUTHORIZED",
         message: "Authentication required"
+      }
+    });
+
+    return null;
+  }
+
+  return auth;
+}
+
+export async function requireAdminSession(request: FastifyRequest, reply: FastifyReply) {
+  const auth = await requireSession(request, reply);
+  if (!auth) {
+    return null;
+  }
+
+  if (!auth.isAdmin) {
+    reply.code(403).send({
+      error: {
+        code: "FORBIDDEN",
+        message: "Admin access required"
       }
     });
 

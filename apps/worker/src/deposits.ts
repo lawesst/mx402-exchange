@@ -1,5 +1,5 @@
 import { Prisma, getPrismaClient } from "@mx402/db";
-import { loadSharedRuntimeConfig, optionalEnv, requireEnv } from "@mx402/config";
+import { buildChainReadHeaders, loadChainReadRuntimeConfig, loadSharedRuntimeConfig, requireEnv } from "@mx402/config";
 import type { Logger } from "@mx402/observability";
 
 type TransactionRecord = {
@@ -38,10 +38,6 @@ export type DepositSyncResult = {
   pending: number;
   skipped: number;
 };
-
-function getMultiversxTransactionBaseUrl() {
-  return optionalEnv("MULTIVERSX_GATEWAY_URL", optionalEnv("MULTIVERSX_API_URL", "https://api.multiversx.com")).replace(/\/+$/, "");
-}
 
 function isMostlyPrintable(value: string): boolean {
   return /^[\x20-\x7e]+$/.test(value);
@@ -208,25 +204,32 @@ function interpretDeposit(transaction: TransactionRecord, input: {
 }
 
 async function fetchTransaction(txHash: string) {
-  const baseUrl = getMultiversxTransactionBaseUrl();
-  const candidates = [
-    `${baseUrl}/transaction/${txHash}?withResults=true`,
-    `${baseUrl}/transactions/${txHash}?withResults=true`
-  ];
+  const { apiUrl, gatewayUrl } = loadChainReadRuntimeConfig();
+  const candidates = Array.from(new Set([
+    `${gatewayUrl}/transaction/${txHash}?withResults=true`,
+    `${gatewayUrl}/transactions/${txHash}?withResults=true`,
+    `${apiUrl}/transactions/${txHash}?withResults=true`,
+    `${apiUrl}/transaction/${txHash}?withResults=true`
+  ]));
+  const failures: string[] = [];
 
   for (const candidate of candidates) {
-    const response = await fetch(candidate, {
-      headers: {
-        accept: "application/json"
-      }
-    });
+    try {
+      const response = await fetch(candidate, {
+        headers: buildChainReadHeaders()
+      });
 
-    if (response.ok) {
-      return response.json();
+      if (response.ok) {
+        return response.json();
+      }
+
+      failures.push(`${candidate} -> HTTP ${response.status}`);
+    } catch (error) {
+      failures.push(`${candidate} -> ${error instanceof Error ? error.message : "fetch failed"}`);
     }
   }
 
-  throw new Error(`Failed to fetch transaction ${txHash} from configured MultiversX endpoint`);
+  throw new Error(`Failed to fetch transaction ${txHash} from configured MultiversX endpoint: ${failures.join("; ")}`);
 }
 
 async function applyConfirmedDeposit(input: {

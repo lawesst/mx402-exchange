@@ -1,6 +1,7 @@
 node_modules
 dist
 .next
+.next-build
 .turbo
 .env
 .env.local
@@ -10,3 +11,5 @@ coverage
 *.tsbuildinfo
 .DS_Store
 .prisma
+node_modules.bak
+apps/web/certificates
