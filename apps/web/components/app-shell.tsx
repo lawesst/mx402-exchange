@@ -4,16 +4,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 
+import { useViewerQuery } from '../lib/hooks';
 import { TickerBar } from './ticker-bar';
 import { WalletWidget } from './wallet-widget';
-
-const navigation = [
-  { href: '/marketplace', label: 'Marketplace' },
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/analytics', label: 'Analytics' },
-  { href: '/wallet', label: 'Wallet' },
-  { href: '/publish', label: 'Publish' }
-];
 
 function resolveNetworkLabel() {
   const environment = (process.env.NEXT_PUBLIC_MULTIVERSX_ENV ?? '').toLowerCase();
@@ -34,6 +27,15 @@ function resolveNetworkLabel() {
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? '';
   const networkLabel = resolveNetworkLabel();
+  const { data: viewer } = useViewerQuery();
+  const navigation = [
+    { href: '/marketplace', label: 'Marketplace' },
+    { href: '/dashboard', label: 'Dashboard' },
+    { href: '/analytics', label: 'Analytics' },
+    { href: '/wallet', label: 'Wallet' },
+    { href: '/publish', label: 'Publish' },
+    ...(viewer?.user?.isAdmin ? [{ href: '/admin', label: 'Admin' }] : [])
+  ];
 
   return (
     <div className="relative z-10 min-h-screen bg-transparent text-ink">

@@ -4,6 +4,8 @@ import type {
   ChainOverview,
   MarketplaceProduct,
   ProductDetail,
+  AdminProviderRecord,
+  ProviderProfile,
   ProviderEarnings,
   ProviderProduct,
   UsageEvent,
@@ -241,6 +243,10 @@ export async function fetchProviderProducts() {
   return response?.data ?? [];
 }
 
+export async function fetchProviderProfile() {
+  return fetchInternal<ProviderProfile>('/v1/providers/me', { method: 'GET' }, true);
+}
+
 export async function fetchProviderEarnings() {
   return fetchInternal<ProviderEarnings>('/v1/providers/me/earnings', { method: 'GET' }, true);
 }
@@ -291,6 +297,60 @@ export async function submitProviderProduct(input: Record<string, unknown>) {
   return fetchInternal('/v1/providers/me/products', {
     method: 'POST',
     body: JSON.stringify(input)
+  });
+}
+
+export async function createProviderProfile(input: Record<string, unknown>) {
+  return fetchInternal('/v1/providers', {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateProviderProfile(input: Record<string, unknown>) {
+  return fetchInternal('/v1/providers/me', {
+    method: 'PATCH',
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateProviderProduct(productId: string, input: Record<string, unknown>) {
+  return fetchInternal(`/v1/providers/me/products/${productId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input)
+  });
+}
+
+export async function fetchAdminProviders() {
+  const response = await fetchInternal<{ data: AdminProviderRecord[] }>('/v1/admin/providers', { method: 'GET' }, true);
+  return response?.data ?? [];
+}
+
+export async function approveAdminProvider(providerId: string, notes?: string) {
+  return fetchInternal(`/v1/admin/providers/${providerId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(notes ? { notes } : {})
+  });
+}
+
+export async function rejectAdminProvider(providerId: string, notes?: string) {
+  return fetchInternal(`/v1/admin/providers/${providerId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify(notes ? { notes } : {})
+  });
+}
+
+export async function activateAdminProduct(productId: string, notes?: string) {
+  return fetchInternal(`/v1/admin/products/${productId}/activate`, {
+    method: 'POST',
+    body: JSON.stringify(notes ? { notes } : {})
+  });
+}
+
+export async function pauseAdminProduct(productId: string, notes?: string) {
+  return fetchInternal(`/v1/admin/products/${productId}/pause`, {
+    method: 'POST',
+    body: JSON.stringify(notes ? { notes } : {})
   });
 }
 

@@ -71,6 +71,21 @@ export type ProviderSummary = {
   displayName: string;
 } | null;
 
+export type ProviderProfile = {
+  id: string;
+  userId: string;
+  status: string;
+  slug: string;
+  displayName: string;
+  description: string | null;
+  websiteUrl: string | null;
+  payoutWalletAddress: string;
+  approvalNotes: string | null;
+  approvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ViewerResponse = {
   user: UserSummary;
   provider: ProviderSummary;
@@ -116,6 +131,14 @@ export type ProviderProduct = {
   priceAtomic: string;
   timeoutMs: number;
   rateLimitPerMinute: number;
+  chargePolicy: string;
+  originAuthMode: 'none' | 'static_header';
+  originAuthHeaderName: string | null;
+  originAuthSecretConfigured: boolean;
+  pathParamsSchemaJson: Record<string, unknown>;
+  inputSchemaJson: Record<string, unknown>;
+  querySchemaJson: Record<string, unknown>;
+  outputSchemaJson: Record<string, unknown>;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -174,4 +197,22 @@ export type WalletConnection = {
   nativeAuthToken: string | null;
   networkAccountMissing?: boolean;
   warningMessage?: string | null;
+};
+
+export type AdminProviderRecord = {
+  id: string;
+  slug: string;
+  status: string;
+  displayName: string;
+  payoutWalletAddress: string;
+  walletAddress: string;
+  approvalNotes: string | null;
+  approvedAt: string | null;
+  createdAt: string;
+  products: Array<{
+    id: string;
+    slug: string;
+    name: string;
+    status: string;
+  }>;
 };

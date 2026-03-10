@@ -1,5 +1,8 @@
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+
+const PROVIDER_SECRET_ENVELOPE_PREFIX = "enc:v1:";
 
 function parseEnvFile(contents: string): Record<string, string> {
   const result: Record<string, string> = {};
@@ -126,4 +129,52 @@ export function buildChainReadHeaders(extraHeaders?: Record<string, string>): Re
     ...(apiKey ? { "Api-Key": apiKey } : {}),
     ...(extraHeaders ?? {})
   };
+}
+
+function deriveProviderSecretEncryptionKey(secret: string): Buffer {
+  return createHash("sha256").update(secret, "utf8").digest();
+}
+
+function requireProviderSecretEncryptionKey(): Buffer {
+  const secret = process.env.MX402_PROVIDER_SECRET_ENCRYPTION_KEY;
+  if (!secret) {
+    throw new Error("Missing required env var: MX402_PROVIDER_SECRET_ENCRYPTION_KEY");
+  }
+
+  return deriveProviderSecretEncryptionKey(secret);
+}
+
+export function isEncryptedProviderSecret(value: string): boolean {
+  return value.startsWith(PROVIDER_SECRET_ENVELOPE_PREFIX);
+}
+
+export function encryptProviderSecret(plaintext: string): string {
+  const key = requireProviderSecretEncryptionKey();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  return `${PROVIDER_SECRET_ENVELOPE_PREFIX}${iv.toString("base64url")}.${authTag.toString("base64url")}.${ciphertext.toString("base64url")}`;
+}
+
+export function decryptProviderSecret(ciphertextEnvelope: string): string {
+  if (!isEncryptedProviderSecret(ciphertextEnvelope)) {
+    return ciphertextEnvelope;
+  }
+
+  const payload = ciphertextEnvelope.slice(PROVIDER_SECRET_ENVELOPE_PREFIX.length);
+  const [ivBase64Url, authTagBase64Url, ciphertextBase64Url] = payload.split(".");
+  if (!ivBase64Url || !authTagBase64Url || !ciphertextBase64Url) {
+    throw new Error("Invalid provider secret envelope");
+  }
+
+  const key = requireProviderSecretEncryptionKey();
+  const iv = Buffer.from(ivBase64Url, "base64url");
+  const authTag = Buffer.from(authTagBase64Url, "base64url");
+  const ciphertext = Buffer.from(ciphertextBase64Url, "base64url");
+  const decipher = createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(authTag);
+
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
 }

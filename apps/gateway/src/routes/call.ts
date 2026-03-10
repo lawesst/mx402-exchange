@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import type { FastifyInstance, FastifyReply } from "fastify";
 
-import { loadSharedRuntimeConfig, optionalEnv } from "@mx402/config";
+import { decryptProviderSecret, loadSharedRuntimeConfig, optionalEnv } from "@mx402/config";
 import { Prisma, getPrismaClient } from "@mx402/db";
 import { atomicToString, computeSpendableAtomic, gatewayCallSchema } from "@mx402/domain";
 
@@ -256,6 +256,24 @@ export async function registerGatewayRoutes(app: FastifyInstance) {
       throw new HttpError(404, "NOT_FOUND", "Product not found");
     }
 
+    let originAuthSecret: string | null = null;
+    if (productRecord.origin_auth_secret_ciphertext) {
+      try {
+        originAuthSecret = decryptProviderSecret(productRecord.origin_auth_secret_ciphertext);
+      } catch (error) {
+        request.log.error(
+          {
+            error,
+            productId: productRecord.id,
+            providerId: productRecord.provider_id
+          },
+          "Failed to decrypt provider upstream auth secret"
+        );
+
+        throw new HttpError(500, "PRODUCT_CONFIGURATION_ERROR", "Product upstream auth configuration is invalid");
+      }
+    }
+
     const actor: GatewayActor = {
       apiKeyId: apiKeyRecord.id,
       projectId: apiKeyRecord.project_id,
@@ -276,7 +294,7 @@ export async function registerGatewayRoutes(app: FastifyInstance) {
       rateLimitPerMinute: productRecord.rate_limit_per_minute,
       originAuthMode: productRecord.origin_auth_mode,
       originAuthHeaderName: productRecord.origin_auth_header_name,
-      originAuthSecret: productRecord.origin_auth_secret_ciphertext,
+      originAuthSecret,
       providerId: productRecord.provider.id,
       providerSlug: productRecord.provider.slug,
       providerName: productRecord.provider.display_name,

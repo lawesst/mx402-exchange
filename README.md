@@ -20,6 +20,7 @@ This workspace is scaffolded from the implementation spec in:
 - Prisma schema scaffolded
 - API, gateway, worker, and web starter code scaffolded
 - Contract interface stub scaffolded
+- Provider upstream static-header secrets are encrypted at rest
 - Business logic is intentionally incomplete and follows the spec as TODOs
 
 ## Chain Infrastructure
@@ -55,6 +56,9 @@ Required environment for a real devnet run:
 - `MX402_PROVIDER_PRIVATE_KEY`
 - `MX402_BUYER_PRIVATE_KEY`
 - `MX402_LEDGER_CONTRACT` if the contract is already deployed
+
+Required environment for provider products that use static upstream auth headers:
+- `MX402_PROVIDER_SECRET_ENCRYPTION_KEY`
 
 Notes:
 - The ledger deploy script writes `MX402_LEDGER_CONTRACT`, `MX402_ASSET_IDENTIFIER`, and `MX402_LEDGER_FEE_BPS` into `.env.local` unless `--no-write-env` is passed.

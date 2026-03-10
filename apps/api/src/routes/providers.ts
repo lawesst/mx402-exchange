@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import { Prisma, getPrismaClient } from "@mx402/db";
-import { loadSharedRuntimeConfig, requireEnv } from "@mx402/config";
+import { encryptProviderSecret, loadSharedRuntimeConfig, requireEnv } from "@mx402/config";
 import {
   createProductSchema,
   createProviderSchema,
@@ -62,6 +62,7 @@ function serializeProduct(product: {
   charge_policy: string;
   origin_auth_mode: string;
   origin_auth_header_name: string | null;
+  origin_auth_secret_ciphertext?: string | null;
   path_params_schema_json: unknown;
   input_schema_json: unknown;
   query_schema_json: unknown;
@@ -86,6 +87,7 @@ function serializeProduct(product: {
     chargePolicy: product.charge_policy,
     originAuthMode: product.origin_auth_mode,
     originAuthHeaderName: product.origin_auth_header_name,
+    originAuthSecretConfigured: Boolean(product.origin_auth_secret_ciphertext),
     pathParamsSchemaJson: product.path_params_schema_json,
     inputSchemaJson: product.input_schema_json,
     querySchemaJson: product.query_schema_json,
@@ -241,8 +243,11 @@ export async function registerProviderRoutes(app: FastifyInstance) {
         timeout_ms: input.timeoutMs,
         rate_limit_per_minute: input.rateLimitPerMinute,
         origin_auth_mode: input.originAuthMode,
-        origin_auth_header_name: input.originAuthHeaderName ?? null,
-        origin_auth_secret_ciphertext: input.originAuthSecret ?? null,
+        origin_auth_header_name: input.originAuthMode === "static_header" ? input.originAuthHeaderName ?? null : null,
+        origin_auth_secret_ciphertext:
+          input.originAuthMode === "static_header" && input.originAuthSecret
+            ? encryptProviderSecret(input.originAuthSecret)
+            : null,
         path_params_schema_json: input.pathParamsSchemaJson as Prisma.InputJsonValue,
         input_schema_json: input.inputSchemaJson as Prisma.InputJsonValue,
         query_schema_json: input.querySchemaJson as Prisma.InputJsonValue,
@@ -354,6 +359,41 @@ export async function registerProviderRoutes(app: FastifyInstance) {
       });
     }
 
+    const nextOriginAuthMode = input.originAuthMode ?? existingProduct.origin_auth_mode;
+    const nextOriginAuthHeaderName =
+      nextOriginAuthMode === "static_header"
+        ? input.originAuthHeaderName ?? existingProduct.origin_auth_header_name
+        : null;
+
+    if (nextOriginAuthMode === "static_header" && !nextOriginAuthHeaderName) {
+      return reply.code(422).send({
+        error: {
+          code: "INVALID_PRODUCT_INPUT",
+          message: "Static header auth requires a header name"
+        }
+      });
+    }
+
+    if (
+      nextOriginAuthMode === "static_header" &&
+      input.originAuthSecret === undefined &&
+      !existingProduct.origin_auth_secret_ciphertext
+    ) {
+      return reply.code(422).send({
+        error: {
+          code: "INVALID_PRODUCT_INPUT",
+          message: "Static header auth requires a secret"
+        }
+      });
+    }
+
+    const nextOriginAuthSecretCiphertext =
+      nextOriginAuthMode === "static_header"
+        ? input.originAuthSecret !== undefined
+          ? encryptProviderSecret(input.originAuthSecret)
+          : existingProduct.origin_auth_secret_ciphertext
+        : null;
+
     const product = await prisma.providerProduct.update({
       where: {
         id: existingProduct.id
@@ -370,8 +410,14 @@ export async function registerProviderRoutes(app: FastifyInstance) {
         timeout_ms: input.timeoutMs ?? undefined,
         rate_limit_per_minute: input.rateLimitPerMinute ?? undefined,
         origin_auth_mode: input.originAuthMode ?? undefined,
-        origin_auth_header_name: input.originAuthHeaderName ?? undefined,
-        origin_auth_secret_ciphertext: input.originAuthSecret ?? undefined,
+        origin_auth_header_name:
+          input.originAuthMode !== undefined || input.originAuthHeaderName !== undefined
+            ? nextOriginAuthHeaderName
+            : undefined,
+        origin_auth_secret_ciphertext:
+          input.originAuthMode !== undefined || input.originAuthSecret !== undefined
+            ? nextOriginAuthSecretCiphertext
+            : undefined,
         path_params_schema_json: (input.pathParamsSchemaJson as Prisma.InputJsonValue | undefined) ?? undefined,
         input_schema_json: (input.inputSchemaJson as Prisma.InputJsonValue | undefined) ?? undefined,
         query_schema_json: (input.querySchemaJson as Prisma.InputJsonValue | undefined) ?? undefined,

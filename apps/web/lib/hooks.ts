@@ -3,10 +3,12 @@
 import { useQuery } from '@tanstack/react-query';
 
 import {
+  fetchAdminProviders,
   fetchChainOverview,
   fetchMarketplaceProducts,
   fetchMirrorTransactions,
   fetchProductBySlug,
+  fetchProviderProfile,
   fetchProjects,
   fetchProviderEarnings,
   fetchProviderProducts,
@@ -78,6 +80,14 @@ export function useProviderProductsQuery(enabled = true) {
   });
 }
 
+export function useProviderProfileQuery(enabled = true) {
+  return useQuery({
+    queryKey: ['provider-profile'],
+    queryFn: fetchProviderProfile,
+    enabled
+  });
+}
+
 export function useProviderEarningsQuery(enabled = true) {
   return useQuery({
     queryKey: ['provider-earnings'],
@@ -107,6 +117,14 @@ export function useMirrorTransactionsQuery(enabled = true) {
   return useQuery({
     queryKey: ['mirror-transactions'],
     queryFn: fetchMirrorTransactions,
+    enabled
+  });
+}
+
+export function useAdminProvidersQuery(enabled = true) {
+  return useQuery({
+    queryKey: ['admin-providers'],
+    queryFn: fetchAdminProviders,
     enabled
   });
 }
