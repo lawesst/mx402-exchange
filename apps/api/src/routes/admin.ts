@@ -2,8 +2,12 @@ import type { FastifyInstance } from "fastify";
 
 import { Prisma, getPrismaClient } from "@mx402/db";
 import { adminNotesSchema } from "@mx402/domain";
+import { createLogger } from "@mx402/observability";
 
 import { requireAdminSession } from "../auth.js";
+import { confirmSubmittedSettlementBatches } from "../../../worker/src/settlements.js";
+
+const settlementRefreshLogger = createLogger("admin-settlement-refresh");
 
 async function appendAuditLog(input: {
   actorUserId: string;
@@ -273,6 +277,23 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         createdAt: batch.created_at.toISOString()
       }))
     });
+  });
+
+  app.post("/v1/admin/settlement-batches/refresh", async (request, reply) => {
+    const auth = await requireAdminSession(request, reply);
+    if (!auth) {
+      return reply;
+    }
+
+    const confirmation = await confirmSubmittedSettlementBatches(settlementRefreshLogger);
+
+    await appendAuditLog({
+      actorUserId: auth.userId,
+      action: "refresh_settlement_batches",
+      entityType: "settlement_batch"
+    });
+
+    return reply.code(200).send(confirmation);
   });
 
   app.post("/v1/admin/settlement-batches/:batchId/retry", async (request, reply) => {

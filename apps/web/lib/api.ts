@@ -1,14 +1,22 @@
 import type {
   ActivityItem,
+  CreatedProjectApiKey,
   BuyerProject,
   ChainOverview,
   MarketplaceProduct,
   ProductDetail,
   AdminProviderRecord,
+  ProjectApiKey,
+  ProjectDetail,
+  PreparedProviderClaim,
   ProviderProfile,
+  ProviderClaimRefresh,
   ProviderEarnings,
   ProviderProduct,
+  SettlementBatchRecord,
+  SettlementRefreshResult,
   UsageEvent,
+  UsageReceipt,
   ViewerResponse,
   MirrorTransaction,
   WalletAccount,
@@ -81,12 +89,34 @@ async function parseJson<T>(response: Response): Promise<T> {
   return (text ? JSON.parse(text) : null) as T;
 }
 
+function extractErrorMessage(payload: unknown, fallbackStatus: number) {
+  if (Array.isArray(payload)) {
+    const messages = payload
+      .map((item) => (item && typeof item === 'object' && 'message' in item ? String((item as { message: unknown }).message) : null))
+      .filter(Boolean);
+
+    if (messages.length > 0) {
+      return messages.join(', ');
+    }
+  }
+
+  if (payload && typeof payload === 'object') {
+    const maybePayload = payload as { error?: { message?: string } };
+    if (maybePayload.error?.message) {
+      return maybePayload.error.message;
+    }
+  }
+
+  return `Internal request failed: ${fallbackStatus}`;
+}
+
 async function fetchInternal<T>(path: string, init?: RequestInit, allowUnauthorized = false): Promise<T | null> {
+  const hasBody = init?.body !== undefined;
   const response = await fetch(`${getInternalApiBase()}${path}`, {
     ...init,
     credentials: 'include',
     headers: {
-      'content-type': 'application/json',
+      ...(hasBody ? { 'content-type': 'application/json' } : {}),
       ...(init?.headers ?? {})
     }
   });
@@ -96,8 +126,8 @@ async function fetchInternal<T>(path: string, init?: RequestInit, allowUnauthori
   }
 
   if (!response.ok) {
-    const payload = await parseJson<{ error?: { message?: string } }>(response).catch(() => null);
-    throw new HttpError(payload?.error?.message ?? `Internal request failed: ${response.status}`, response.status);
+    const payload = await parseJson<unknown>(response).catch(() => null);
+    throw new HttpError(extractErrorMessage(payload, response.status), response.status);
   }
 
   return parseJson<T>(response);
@@ -233,9 +263,43 @@ export async function fetchUsageEvents() {
   return response?.data ?? [];
 }
 
+export async function fetchUsageReceipt(receiptId: string) {
+  return fetchInternal<UsageReceipt>(`/v1/usage/receipts/${receiptId}`, { method: 'GET' }, true);
+}
+
 export async function fetchProjects() {
   const response = await fetchInternal<{ data: BuyerProject[] }>('/v1/projects', { method: 'GET' }, true);
   return response?.data ?? [];
+}
+
+export async function createBuyerProject(input: { name: string }) {
+  return fetchInternal<BuyerProject>('/v1/projects', {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
+export async function fetchProjectDetail(projectId: string) {
+  return fetchInternal<ProjectDetail>(`/v1/projects/${projectId}`, { method: 'GET' }, true);
+}
+
+export async function createProjectGrant(projectId: string, input: { productId: string }) {
+  return fetchInternal(`/v1/projects/${projectId}/grants`, {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
+export async function fetchProjectApiKeys(projectId: string) {
+  const response = await fetchInternal<{ data: ProjectApiKey[] }>(`/v1/projects/${projectId}/api-keys`, { method: 'GET' }, true);
+  return response?.data ?? [];
+}
+
+export async function createProjectApiKey(projectId: string, input: { name: string }) {
+  return fetchInternal<CreatedProjectApiKey>(`/v1/projects/${projectId}/api-keys`, {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
 }
 
 export async function fetchProviderProducts() {
@@ -249,6 +313,26 @@ export async function fetchProviderProfile() {
 
 export async function fetchProviderEarnings() {
   return fetchInternal<ProviderEarnings>('/v1/providers/me/earnings', { method: 'GET' }, true);
+}
+
+export async function prepareProviderClaim(input?: { amountAtomic?: string }) {
+  return fetchInternal<PreparedProviderClaim>('/v1/providers/me/claim/prepare', {
+    method: 'POST',
+    body: JSON.stringify(input ?? {})
+  });
+}
+
+export async function trackProviderClaim(input: { txHash: string; amountAtomic: string }) {
+  return fetchInternal('/v1/providers/me/claim/track', {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
+export async function refreshProviderClaimState() {
+  return fetchInternal<ProviderClaimRefresh>('/v1/providers/me/claim/refresh', {
+    method: 'POST'
+  });
 }
 
 export async function fetchWalletAccount(address: string) {
@@ -326,6 +410,17 @@ export async function fetchAdminProviders() {
   return response?.data ?? [];
 }
 
+export async function fetchSettlementBatches() {
+  const response = await fetchInternal<{ data: SettlementBatchRecord[] }>('/v1/admin/settlement-batches', { method: 'GET' }, true);
+  return response?.data ?? [];
+}
+
+export async function refreshSettlementBatches() {
+  return fetchInternal<SettlementRefreshResult>('/v1/admin/settlement-batches/refresh', {
+    method: 'POST'
+  });
+}
+
 export async function approveAdminProvider(providerId: string, notes?: string) {
   return fetchInternal(`/v1/admin/providers/${providerId}/approve`, {
     method: 'POST',
@@ -351,6 +446,12 @@ export async function pauseAdminProduct(productId: string, notes?: string) {
   return fetchInternal(`/v1/admin/products/${productId}/pause`, {
     method: 'POST',
     body: JSON.stringify(notes ? { notes } : {})
+  });
+}
+
+export async function retrySettlementBatch(batchId: string) {
+  return fetchInternal(`/v1/admin/settlement-batches/${batchId}/retry`, {
+    method: 'POST'
   });
 }
 

@@ -119,6 +119,41 @@ export type BuyerProject = {
   updatedAt: string;
 };
 
+export type ProjectGrant = {
+  productId: string;
+  productSlug: string;
+  productName: string;
+  providerName: string;
+  grantedAt: string;
+};
+
+export type ProjectDetail = {
+  id: string;
+  name: string;
+  status: string;
+  grants: ProjectGrant[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectApiKey = {
+  id: string;
+  name: string;
+  prefix: string;
+  status: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+};
+
+export type CreatedProjectApiKey = {
+  id: string;
+  name: string;
+  prefix: string;
+  apiKey: string;
+  createdAt: string;
+};
+
 export type ProviderProduct = {
   id: string;
   slug: string;
@@ -160,6 +195,29 @@ export type ProviderEarnings = {
     amountAtomic: string;
     occurredAt: string;
   }>;
+};
+
+export type UsageReceipt = {
+  id: string;
+  amountAtomic: string;
+  assetIdentifier: string;
+  buyerWalletAddress: string;
+  providerWalletAddress: string;
+  chainBatchId: string | null;
+  productSnapshot: Record<string, unknown>;
+  usageEvent: {
+    id: string;
+    requestStatus: string;
+    providerStatusCode: number | null;
+    latencyMs: number | null;
+    product: {
+      id: string;
+      slug: string;
+      name: string;
+      providerName: string;
+    };
+  };
+  createdAt: string;
 };
 
 export type WalletAccount = {
@@ -215,4 +273,52 @@ export type AdminProviderRecord = {
     name: string;
     status: string;
   }>;
+};
+
+export type PreparedProviderClaim = {
+  receiver: string;
+  chainId: string;
+  function: string;
+  data: string;
+  value: string;
+  gasPrice: number;
+  version: number;
+  amountAtomic?: string;
+  gasLimit: number;
+  arguments?: string[];
+  providerId: string;
+  payoutWalletAddress: string;
+  claimableAtomic: string;
+};
+
+export type ProviderClaimRefresh = {
+  confirmation: {
+    confirmed: number;
+    failed: number;
+    pending: number;
+  };
+  balances: {
+    unsettledEarnedAtomic: string;
+    claimableOnchainAtomic: string;
+    claimedTotalAtomic: string;
+  };
+};
+
+export type SettlementBatchRecord = {
+  id: string;
+  batchId: string;
+  status: string;
+  assetIdentifier: string;
+  totalBuyerDebitsAtomic: string;
+  totalProviderCreditsAtomic: string;
+  platformFeeAtomic: string;
+  lineCount: number;
+  txHash: string | null;
+  createdAt: string;
+};
+
+export type SettlementRefreshResult = {
+  confirmed: number;
+  failed: number;
+  pending: number;
 };

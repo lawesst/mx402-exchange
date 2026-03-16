@@ -77,6 +77,12 @@ function slugify(value: string) {
     .slice(0, 64);
 }
 
+function buildUniqueDraftSlug(value: string) {
+  const base = slugify(value) || 'api';
+  const suffix = Date.now().toString(36).slice(-4);
+  return `${base}-${suffix}`.slice(0, 64);
+}
+
 function toProviderDraft(input: {
   slug: string;
   displayName: string;
@@ -112,8 +118,10 @@ function toProductDraft(product: ProviderProduct): ProductDraft {
 }
 
 function buildProductPayload(input: ProductDraft) {
+  const effectiveSlug = input.slug || buildUniqueDraftSlug(input.name);
+
   return {
-    slug: input.slug,
+    slug: effectiveSlug,
     name: input.name,
     shortDescription: input.shortDescription,
     description: input.description || undefined,
@@ -252,9 +260,11 @@ export function PublishScreen() {
     setProviderErrorMessage(null);
 
     try {
+      const effectiveProviderSlug = providerDraft.slug || slugify(providerDraft.displayName);
+
       if (providerProfile) {
         await updateProviderProfile({
-          slug: providerDraft.slug,
+          slug: effectiveProviderSlug,
           displayName: providerDraft.displayName,
           description: providerDraft.description || undefined,
           websiteUrl: providerDraft.websiteUrl || undefined,
@@ -263,7 +273,7 @@ export function PublishScreen() {
         setProviderMessage('Provider profile updated.');
       } else {
         await createProviderProfile({
-          slug: providerDraft.slug,
+          slug: effectiveProviderSlug,
           displayName: providerDraft.displayName,
           description: providerDraft.description || undefined,
           websiteUrl: providerDraft.websiteUrl || undefined,
@@ -271,6 +281,11 @@ export function PublishScreen() {
         });
         setProviderMessage('Provider profile created.');
       }
+
+      setProviderDraft((current) => ({
+        ...current,
+        slug: effectiveProviderSlug
+      }));
 
       await refreshProviderData();
     } catch (error) {
@@ -301,14 +316,22 @@ export function PublishScreen() {
     setProductErrorMessage(null);
 
     try {
+      const normalizedDraft = {
+        ...productDraft,
+        slug: productDraft.slug || buildUniqueDraftSlug(productDraft.name)
+      };
+      const payload = buildProductPayload(normalizedDraft);
+
       if (selectedProduct) {
-        await updateProviderProduct(selectedProduct.id, reviewPayload);
+        await updateProviderProduct(selectedProduct.id, payload);
         setProductMessage('Draft updated.');
       } else {
-        const created = (await submitProviderProduct(reviewPayload)) as { id: string };
+        const created = (await submitProviderProduct(payload)) as { id: string };
         setSelectedProductId(created.id);
         setProductMessage('Draft created.');
       }
+
+      setProductDraft(normalizedDraft);
 
       await refreshProviderData();
       setRotateSecret(false);
@@ -325,12 +348,17 @@ export function PublishScreen() {
     setProductErrorMessage(null);
 
     try {
+      const normalizedDraft = {
+        ...productDraft,
+        slug: productDraft.slug || buildUniqueDraftSlug(productDraft.name)
+      };
+      const payload = buildProductPayload(normalizedDraft);
       let productId = selectedProduct?.id ?? null;
 
       if (selectedProduct) {
-        await updateProviderProduct(selectedProduct.id, reviewPayload);
+        await updateProviderProduct(selectedProduct.id, payload);
       } else {
-        const created = (await submitProviderProduct(reviewPayload)) as { id: string };
+        const created = (await submitProviderProduct(payload)) as { id: string };
         productId = created.id;
         setSelectedProductId(created.id);
       }
@@ -341,6 +369,7 @@ export function PublishScreen() {
 
       await submitProductForReview(productId);
       await refreshProviderData();
+      setProductDraft(normalizedDraft);
       setProductMessage('Draft saved and submitted for review.');
       setRotateSecret(false);
       setPublishStep(steps.length - 1);

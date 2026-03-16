@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "MX402_NEXT_DIST_DIR=.next-build NEXT_IGNORE_INCORRECT_LOCKFILE=1 next build",
-    "dev": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 next dev -p 3002",
+    "dev": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 node dev-server.mjs",
     "start": "MX402_NEXT_DIST_DIR=.next-build next start"
   },
   "dependencies": {

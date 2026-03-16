@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 
 import { Prisma, getPrismaClient } from "@mx402/db";
 import { encryptProviderSecret, loadSharedRuntimeConfig, requireEnv } from "@mx402/config";
+import { createLogger } from "@mx402/observability";
 import {
   createProductSchema,
   createProviderSchema,
@@ -14,6 +15,18 @@ import { prepareClaimProviderEarningsCall } from "@mx402/multiversx";
 
 import { requireSession } from "../auth.js";
 import { trackProviderClaimTransaction } from "../deposits.js";
+import { confirmSubmittedProviderClaims } from "../../../worker/src/claims.js";
+
+const claimRefreshLogger = createLogger("provider-claim-refresh");
+
+function isUniqueConstraintError(error: unknown, fieldName: string) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002" &&
+    Array.isArray(error.meta?.target) &&
+    error.meta.target.includes(fieldName)
+  );
+}
 
 function serializeProvider(provider: {
   id: string;
@@ -121,17 +134,31 @@ export async function registerProviderRoutes(app: FastifyInstance) {
       });
     }
 
-    const provider = await prisma.provider.create({
-      data: {
-        user_id: auth.userId,
-        slug: input.slug,
-        display_name: input.displayName,
-        description: input.description ?? null,
-        website_url: input.websiteUrl ?? null,
-        payout_wallet_address: input.payoutWalletAddress,
-        status: "pending"
+    let provider;
+    try {
+      provider = await prisma.provider.create({
+        data: {
+          user_id: auth.userId,
+          slug: input.slug,
+          display_name: input.displayName,
+          description: input.description ?? null,
+          website_url: input.websiteUrl ?? null,
+          payout_wallet_address: input.payoutWalletAddress,
+          status: "pending"
+        }
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error, "slug")) {
+        return reply.code(409).send({
+          error: {
+            code: "SLUG_CONFLICT",
+            message: "Provider slug is already in use. Choose a different slug."
+          }
+        });
       }
-    });
+
+      throw error;
+    }
 
     return reply.code(201).send(serializeProvider(provider));
   });
@@ -187,20 +214,34 @@ export async function registerProviderRoutes(app: FastifyInstance) {
     const payoutChanged =
       input.payoutWalletAddress !== undefined && input.payoutWalletAddress !== existingProvider.payout_wallet_address;
 
-    const provider = await prisma.provider.update({
-      where: {
-        id: existingProvider.id
-      },
-      data: {
-        slug: input.slug ?? undefined,
-        display_name: input.displayName ?? undefined,
-        description: input.description ?? undefined,
-        website_url: input.websiteUrl ?? undefined,
-        payout_wallet_address: input.payoutWalletAddress ?? undefined,
-        status: payoutChanged && existingProvider.status === "approved" ? "pending" : undefined,
-        approved_at: payoutChanged && existingProvider.status === "approved" ? null : undefined
+    let provider;
+    try {
+      provider = await prisma.provider.update({
+        where: {
+          id: existingProvider.id
+        },
+        data: {
+          slug: input.slug ?? undefined,
+          display_name: input.displayName ?? undefined,
+          description: input.description ?? undefined,
+          website_url: input.websiteUrl ?? undefined,
+          payout_wallet_address: input.payoutWalletAddress ?? undefined,
+          status: payoutChanged && existingProvider.status === "approved" ? "pending" : undefined,
+          approved_at: payoutChanged && existingProvider.status === "approved" ? null : undefined
+        }
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error, "slug")) {
+        return reply.code(409).send({
+          error: {
+            code: "SLUG_CONFLICT",
+            message: "Provider slug is already in use. Choose a different slug."
+          }
+        });
       }
-    });
+
+      throw error;
+    }
 
     return reply.code(200).send(serializeProvider(provider));
   });
@@ -228,32 +269,46 @@ export async function registerProviderRoutes(app: FastifyInstance) {
       });
     }
 
-    const product = await prisma.providerProduct.create({
-      data: {
-        provider_id: provider.id,
-        status: "draft",
-        slug: input.slug,
-        name: input.name,
-        short_description: input.shortDescription,
-        description: input.description ?? null,
-        base_url: input.baseUrl,
-        upstream_path_template: input.upstreamPathTemplate,
-        upstream_method: input.upstreamMethod,
-        price_atomic: input.priceAtomic,
-        timeout_ms: input.timeoutMs,
-        rate_limit_per_minute: input.rateLimitPerMinute,
-        origin_auth_mode: input.originAuthMode,
-        origin_auth_header_name: input.originAuthMode === "static_header" ? input.originAuthHeaderName ?? null : null,
-        origin_auth_secret_ciphertext:
-          input.originAuthMode === "static_header" && input.originAuthSecret
-            ? encryptProviderSecret(input.originAuthSecret)
-            : null,
-        path_params_schema_json: input.pathParamsSchemaJson as Prisma.InputJsonValue,
-        input_schema_json: input.inputSchemaJson as Prisma.InputJsonValue,
-        query_schema_json: input.querySchemaJson as Prisma.InputJsonValue,
-        output_schema_json: input.outputSchemaJson as Prisma.InputJsonValue
+    let product;
+    try {
+      product = await prisma.providerProduct.create({
+        data: {
+          provider_id: provider.id,
+          status: "draft",
+          slug: input.slug,
+          name: input.name,
+          short_description: input.shortDescription,
+          description: input.description ?? null,
+          base_url: input.baseUrl,
+          upstream_path_template: input.upstreamPathTemplate,
+          upstream_method: input.upstreamMethod,
+          price_atomic: input.priceAtomic,
+          timeout_ms: input.timeoutMs,
+          rate_limit_per_minute: input.rateLimitPerMinute,
+          origin_auth_mode: input.originAuthMode,
+          origin_auth_header_name: input.originAuthMode === "static_header" ? input.originAuthHeaderName ?? null : null,
+          origin_auth_secret_ciphertext:
+            input.originAuthMode === "static_header" && input.originAuthSecret
+              ? encryptProviderSecret(input.originAuthSecret)
+              : null,
+          path_params_schema_json: input.pathParamsSchemaJson as Prisma.InputJsonValue,
+          input_schema_json: input.inputSchemaJson as Prisma.InputJsonValue,
+          query_schema_json: input.querySchemaJson as Prisma.InputJsonValue,
+          output_schema_json: input.outputSchemaJson as Prisma.InputJsonValue
+        }
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error, "slug")) {
+        return reply.code(409).send({
+          error: {
+            code: "SLUG_CONFLICT",
+            message: "Product slug is already in use. Choose a different slug."
+          }
+        });
       }
-    });
+
+      throw error;
+    }
 
     return reply.code(201).send(serializeProduct(product));
   });
@@ -394,36 +449,50 @@ export async function registerProviderRoutes(app: FastifyInstance) {
           : existingProduct.origin_auth_secret_ciphertext
         : null;
 
-    const product = await prisma.providerProduct.update({
-      where: {
-        id: existingProduct.id
-      },
-      data: {
-        slug: input.slug ?? undefined,
-        name: input.name ?? undefined,
-        short_description: input.shortDescription ?? undefined,
-        description: input.description ?? undefined,
-        base_url: input.baseUrl ?? undefined,
-        upstream_path_template: input.upstreamPathTemplate ?? undefined,
-        upstream_method: input.upstreamMethod ?? undefined,
-        price_atomic: input.priceAtomic ?? undefined,
-        timeout_ms: input.timeoutMs ?? undefined,
-        rate_limit_per_minute: input.rateLimitPerMinute ?? undefined,
-        origin_auth_mode: input.originAuthMode ?? undefined,
-        origin_auth_header_name:
-          input.originAuthMode !== undefined || input.originAuthHeaderName !== undefined
-            ? nextOriginAuthHeaderName
-            : undefined,
-        origin_auth_secret_ciphertext:
-          input.originAuthMode !== undefined || input.originAuthSecret !== undefined
-            ? nextOriginAuthSecretCiphertext
-            : undefined,
-        path_params_schema_json: (input.pathParamsSchemaJson as Prisma.InputJsonValue | undefined) ?? undefined,
-        input_schema_json: (input.inputSchemaJson as Prisma.InputJsonValue | undefined) ?? undefined,
-        query_schema_json: (input.querySchemaJson as Prisma.InputJsonValue | undefined) ?? undefined,
-        output_schema_json: (input.outputSchemaJson as Prisma.InputJsonValue | undefined) ?? undefined
+    let product;
+    try {
+      product = await prisma.providerProduct.update({
+        where: {
+          id: existingProduct.id
+        },
+        data: {
+          slug: input.slug ?? undefined,
+          name: input.name ?? undefined,
+          short_description: input.shortDescription ?? undefined,
+          description: input.description ?? undefined,
+          base_url: input.baseUrl ?? undefined,
+          upstream_path_template: input.upstreamPathTemplate ?? undefined,
+          upstream_method: input.upstreamMethod ?? undefined,
+          price_atomic: input.priceAtomic ?? undefined,
+          timeout_ms: input.timeoutMs ?? undefined,
+          rate_limit_per_minute: input.rateLimitPerMinute ?? undefined,
+          origin_auth_mode: input.originAuthMode ?? undefined,
+          origin_auth_header_name:
+            input.originAuthMode !== undefined || input.originAuthHeaderName !== undefined
+              ? nextOriginAuthHeaderName
+              : undefined,
+          origin_auth_secret_ciphertext:
+            input.originAuthMode !== undefined || input.originAuthSecret !== undefined
+              ? nextOriginAuthSecretCiphertext
+              : undefined,
+          path_params_schema_json: (input.pathParamsSchemaJson as Prisma.InputJsonValue | undefined) ?? undefined,
+          input_schema_json: (input.inputSchemaJson as Prisma.InputJsonValue | undefined) ?? undefined,
+          query_schema_json: (input.querySchemaJson as Prisma.InputJsonValue | undefined) ?? undefined,
+          output_schema_json: (input.outputSchemaJson as Prisma.InputJsonValue | undefined) ?? undefined
+        }
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error, "slug")) {
+        return reply.code(409).send({
+          error: {
+            code: "SLUG_CONFLICT",
+            message: "Product slug is already in use. Choose a different slug."
+          }
+        });
       }
-    });
+
+      throw error;
+    }
 
     return reply.code(200).send(serializeProduct(product));
   });
@@ -635,6 +704,51 @@ export async function registerProviderRoutes(app: FastifyInstance) {
       txHash: tracked.tx_hash,
       status: tracked.status,
       txKind: tracked.tx_kind
+    });
+  });
+
+  app.post("/v1/providers/me/claim/refresh", async (request, reply) => {
+    const auth = await requireSession(request, reply);
+    if (!auth) {
+      return reply;
+    }
+
+    const prisma = getPrismaClient();
+    const provider = await prisma.provider.findUnique({
+      where: {
+        user_id: auth.userId
+      },
+      include: {
+        balance: true
+      }
+    });
+
+    if (!provider) {
+      return reply.code(404).send({
+        error: {
+          code: "NOT_FOUND",
+          message: "Provider profile not found"
+        }
+      });
+    }
+
+    const confirmation = await confirmSubmittedProviderClaims(claimRefreshLogger);
+    const refreshed = await prisma.provider.findUniqueOrThrow({
+      where: {
+        id: provider.id
+      },
+      include: {
+        balance: true
+      }
+    });
+
+    return reply.code(200).send({
+      confirmation,
+      balances: {
+        unsettledEarnedAtomic: refreshed.balance?.unsettled_earned_atomic.toString() ?? "0",
+        claimableOnchainAtomic: refreshed.balance?.claimable_onchain_atomic.toString() ?? "0",
+        claimedTotalAtomic: refreshed.balance?.claimed_total_atomic.toString() ?? "0"
+      }
     });
   });
 }

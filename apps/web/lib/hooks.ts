@@ -7,8 +7,11 @@ import {
   fetchChainOverview,
   fetchMarketplaceProducts,
   fetchMirrorTransactions,
+  fetchProjectApiKeys,
+  fetchProjectDetail,
   fetchProductBySlug,
   fetchProviderProfile,
+  fetchSettlementBatches,
   fetchProjects,
   fetchProviderEarnings,
   fetchProviderProducts,
@@ -72,6 +75,22 @@ export function useProjectsQuery(enabled = true) {
   });
 }
 
+export function useProjectDetailQuery(projectId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['buyer-project', projectId],
+    queryFn: () => fetchProjectDetail(projectId!),
+    enabled: enabled && Boolean(projectId)
+  });
+}
+
+export function useProjectApiKeysQuery(projectId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ['project-api-keys', projectId],
+    queryFn: () => fetchProjectApiKeys(projectId!),
+    enabled: enabled && Boolean(projectId)
+  });
+}
+
 export function useProviderProductsQuery(enabled = true) {
   return useQuery({
     queryKey: ['provider-products'],
@@ -125,6 +144,14 @@ export function useAdminProvidersQuery(enabled = true) {
   return useQuery({
     queryKey: ['admin-providers'],
     queryFn: fetchAdminProviders,
+    enabled
+  });
+}
+
+export function useSettlementBatchesQuery(enabled = true) {
+  return useQuery({
+    queryKey: ['settlement-batches'],
+    queryFn: fetchSettlementBatches,
     enabled
   });
 }

@@ -17,6 +17,7 @@ import { EnvironmentsEnum } from "@multiversx/sdk-dapp/out/types/enums.types";
 import type { PreparedTransactionCall } from "@mx402/multiversx";
 
 let initPromise: Promise<void> | null = null;
+const DEFAULT_CANONICAL_WALLET_ORIGIN = "https://localhost:3002";
 
 type WalletSummary = {
   address: string | null;
@@ -72,6 +73,26 @@ function getEnvironmentLabel() {
   }
 
   return "Devnet";
+}
+
+export function getCanonicalWalletOrigin() {
+  return process.env.NEXT_PUBLIC_WALLET_CANONICAL_ORIGIN ?? DEFAULT_CANONICAL_WALLET_ORIGIN;
+}
+
+function isLoopbackHost(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+export function shouldRedirectToCanonicalWalletOrigin() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  if (!isLoopbackHost(window.location.hostname)) {
+    return false;
+  }
+
+  return window.location.origin !== getCanonicalWalletOrigin();
 }
 
 function buildMissingAccountMessage() {
@@ -141,19 +162,24 @@ export async function ensureDappReady() {
 
 export async function connectWallet(providerType: typeof ProviderTypeEnum.extension | typeof ProviderTypeEnum.crossWindow) {
   await ensureDappReady();
+  const isLoopbackOrigin = isLoopbackHost(window.location.hostname);
 
-  const isLoopbackHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  if (providerType === ProviderTypeEnum.extension && shouldRedirectToCanonicalWalletOrigin()) {
+    const redirectUrl = `${getCanonicalWalletOrigin()}${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.location.replace(redirectUrl);
+    throw new Error(`Redirecting to the canonical wallet origin for extension login: ${redirectUrl}`);
+  }
 
-  if (providerType === ProviderTypeEnum.extension && !window.isSecureContext && !isLoopbackHost) {
+  if (providerType === ProviderTypeEnum.extension && !window.isSecureContext && !isLoopbackOrigin) {
     throw new Error(`Extension login requires a secure context. Open MX402 on https or localhost. Current origin: ${window.location.origin}`);
   }
 
   if (providerType === ProviderTypeEnum.extension) {
-    const hasExtensionProvider = await waitForInjectedExtensionProvider();
+    const hasExtensionProvider = await waitForInjectedExtensionProvider(8_000);
 
     if (!hasExtensionProvider) {
       throw new Error(
-        "MultiversX Browser Extension was not detected. Install or enable the extension, allow it on this site, then reload https://localhost:3002."
+        `MultiversX Browser Extension was not detected on ${window.location.origin}. Open MX402 on ${getCanonicalWalletOrigin()}, allow the extension on that site, then reload the page.`
       );
     }
   }
@@ -168,7 +194,7 @@ export async function connectWallet(providerType: typeof ProviderTypeEnum.extens
 
   if (providerType === ProviderTypeEnum.extension && !provider.isInitialized()) {
     throw new Error(
-      "MultiversX Browser Extension is installed but did not initialize on this page. Reload the page and confirm the extension has access to localhost."
+      `MultiversX Browser Extension is installed but did not initialize on ${window.location.origin}. Reload the page and confirm the extension has site access on ${getCanonicalWalletOrigin()}.`
     );
   }
 
@@ -241,6 +267,11 @@ export async function getConnectedWallet(): Promise<WalletSummary> {
 export async function signAndSendPreparedTransaction(input: {
   preparedCall: PreparedTransactionCall;
   expectedSender: string;
+  displayInfo?: {
+    processingMessage: string;
+    successMessage: string;
+    errorMessage: string;
+  };
 }) {
   await ensureDappReady();
   const refreshed = await refreshAccount();
@@ -273,12 +304,23 @@ export async function signAndSendPreparedTransaction(input: {
   const transactionManager = TransactionManager.getInstance();
   const sentTransactions = await transactionManager.send(signedTransactions);
   const flattenedTransactions = flattenSentTransactions(sentTransactions);
+  const defaultDisplayInfo =
+    input.preparedCall.function === "claimProviderEarnings"
+      ? {
+          processingMessage: "Submitting provider claim",
+          successMessage: "Provider claim transaction submitted",
+          errorMessage: "Provider claim transaction failed"
+        }
+      : {
+          processingMessage: "Submitting deposit transaction",
+          successMessage: "Deposit transaction submitted",
+          errorMessage: "Deposit transaction failed"
+        };
 
   await transactionManager.track(flattenedTransactions, {
     transactionsDisplayInfo: {
-      processingMessage: "Submitting deposit transaction",
-      successMessage: "Deposit transaction submitted",
-      errorMessage: "Deposit transaction failed"
+      ...defaultDisplayInfo,
+      ...(input.displayInfo ?? {})
     }
   });
 

@@ -8,7 +8,14 @@ import { ProviderTypeEnum } from '@multiversx/sdk-dapp/out/providers/types/provi
 
 import { createSessionWithNativeAuth, logoutSession } from '../lib/api';
 import { useViewerQuery } from '../lib/hooks';
-import { connectWallet, disconnectWallet, ensureDappReady, getConnectedWallet } from '../lib/multiversx';
+import {
+  connectWallet,
+  disconnectWallet,
+  ensureDappReady,
+  getCanonicalWalletOrigin,
+  getConnectedWallet,
+  shouldRedirectToCanonicalWalletOrigin
+} from '../lib/multiversx';
 import type { WalletConnection } from '../lib/types';
 
 type ConnectProviderType = typeof ProviderTypeEnum.extension | typeof ProviderTypeEnum.crossWindow;
@@ -56,6 +63,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     let active = true;
 
     async function bootstrap() {
+      if (shouldRedirectToCanonicalWalletOrigin()) {
+        const redirectUrl = `${getCanonicalWalletOrigin()}${window.location.pathname}${window.location.search}${window.location.hash}`;
+        window.location.replace(redirectUrl);
+        return;
+      }
+
       try {
         await ensureDappReady();
         const connected = await getConnectedWallet();

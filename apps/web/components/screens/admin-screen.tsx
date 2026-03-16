@@ -7,22 +7,35 @@ import {
   activateAdminProduct,
   approveAdminProvider,
   pauseAdminProduct,
-  rejectAdminProvider
+  refreshSettlementBatches,
+  rejectAdminProvider,
+  retrySettlementBatch
 } from '../../lib/api';
-import { useAdminProvidersQuery, useViewerQuery } from '../../lib/hooks';
-import type { AdminProviderRecord } from '../../lib/types';
+import { formatDate, formatEGLD, truncateAddress } from '../../lib/format';
+import { useAdminProvidersQuery, useSettlementBatchesQuery, useViewerQuery } from '../../lib/hooks';
+import type { AdminProviderRecord, SettlementBatchRecord } from '../../lib/types';
 import { AppShell } from '../app-shell';
 import { DataState } from '../data-state';
 import { Panel } from '../panel';
 
+function getExplorerBaseUrl() {
+  return process.env.NEXT_PUBLIC_MULTIVERSX_EXPLORER_URL ?? 'https://devnet-explorer.multiversx.com';
+}
+
 export function AdminScreen() {
   const queryClient = useQueryClient();
   const { data: viewer, isLoading: viewerLoading, error: viewerError } = useViewerQuery();
+  const isAdmin = Boolean(viewer?.user?.isAdmin);
   const {
     data: providers,
     isLoading: providersLoading,
     error: providersError
-  } = useAdminProvidersQuery(Boolean(viewer?.user?.isAdmin));
+  } = useAdminProvidersQuery(isAdmin);
+  const {
+    data: settlementBatches,
+    isLoading: batchesLoading,
+    error: batchesError
+  } = useSettlementBatchesQuery(isAdmin);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -32,7 +45,8 @@ export function AdminScreen() {
       queryClient.invalidateQueries({ queryKey: ['viewer'] }),
       queryClient.invalidateQueries({ queryKey: ['admin-providers'] }),
       queryClient.invalidateQueries({ queryKey: ['provider-products'] }),
-      queryClient.invalidateQueries({ queryKey: ['marketplace-products'] })
+      queryClient.invalidateQueries({ queryKey: ['marketplace-products'] }),
+      queryClient.invalidateQueries({ queryKey: ['settlement-batches'] })
     ]);
   }
 
@@ -52,22 +66,23 @@ export function AdminScreen() {
     }
   }
 
-  const isAdmin = Boolean(viewer?.user?.isAdmin);
-  const dataError = (viewerError as Error | null) ?? (providersError as Error | null);
+  const dataError = (viewerError as Error | null) ?? (providersError as Error | null) ?? (batchesError as Error | null);
+  const pendingProducts = (providers ?? []).flatMap((provider) => provider.products).filter((product) => product.status === 'pending_review').length;
+  const activeProducts = (providers ?? []).flatMap((provider) => provider.products).filter((product) => product.status === 'active').length;
 
   return (
     <AppShell>
       <div className="space-y-6">
         <Panel className="p-7">
           <div className="display-eyebrow">Internal admin</div>
-          <h1 className="mt-4 text-4xl font-semibold md:text-5xl">Provider and product review</h1>
+          <h1 className="mt-4 text-4xl font-semibold md:text-5xl">Moderation and settlement ops</h1>
           <p className="mt-4 max-w-3xl text-base leading-7 text-sub md:text-lg">
-            Approve provider profiles, activate pending listings, and pause products without dropping to manual API calls.
+            Approve provider profiles, activate pending listings, and monitor or refresh settlement batches without dropping to manual API calls.
           </p>
         </Panel>
 
         <DataState
-          isLoading={viewerLoading || providersLoading}
+          isLoading={viewerLoading || providersLoading || batchesLoading}
           error={dataError}
           empty={!viewer?.user}
           emptyTitle="Connect an admin wallet"
@@ -83,7 +98,7 @@ export function AdminScreen() {
               </p>
             </Panel>
           ) : (
-            <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+            <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
               <Panel title="Moderation queue" kicker="Providers and products">
                 <div className="space-y-5">
                   {(providers ?? []).length === 0 ? (
@@ -118,22 +133,44 @@ export function AdminScreen() {
                 <Panel title="Queue summary" kicker="Status">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Metric label="Providers" value={String(providers?.length ?? 0)} />
-                    <Metric
-                      label="Pending providers"
-                      value={String((providers ?? []).filter((provider) => provider.status === 'pending').length)}
-                    />
-                    <Metric
-                      label="Pending products"
-                      value={String(
-                        (providers ?? []).flatMap((provider) => provider.products).filter((product) => product.status === 'pending_review').length
-                      )}
-                    />
-                    <Metric
-                      label="Active products"
-                      value={String(
-                        (providers ?? []).flatMap((provider) => provider.products).filter((product) => product.status === 'active').length
-                      )}
-                    />
+                    <Metric label="Pending providers" value={String((providers ?? []).filter((provider) => provider.status === 'pending').length)} />
+                    <Metric label="Pending products" value={String(pendingProducts)} />
+                    <Metric label="Active products" value={String(activeProducts)} />
+                  </div>
+                </Panel>
+
+                <Panel title="Settlement batches" kicker="Chain reconciliation" actions={
+                  <button
+                    className="action-button"
+                    disabled={busyKey === 'settlement-refresh'}
+                    onClick={() =>
+                      void runAction(
+                        'settlement-refresh',
+                        () => refreshSettlementBatches(),
+                        'Settlement batch statuses refreshed from chain.'
+                      )
+                    }
+                  >
+                    {busyKey === 'settlement-refresh' ? 'Refreshing…' : 'Refresh'}
+                  </button>
+                }>
+                  <div className="space-y-3">
+                    {(settlementBatches ?? []).length === 0 ? (
+                      <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-sub">
+                        No settlement batches recorded yet.
+                      </div>
+                    ) : (
+                      (settlementBatches ?? []).slice(0, 8).map((batch) => (
+                        <SettlementBatchCard
+                          key={batch.id}
+                          batch={batch}
+                          busyKey={busyKey}
+                          onRetry={() =>
+                            runAction(`settlement-retry:${batch.id}`, () => retrySettlementBatch(batch.id), `Marked batch ${batch.batchId} for retry.`)
+                          }
+                        />
+                      ))
+                    )}
                   </div>
                 </Panel>
 
@@ -174,8 +211,8 @@ function ProviderModerationCard({
           <div className="mt-1 font-mono text-xs text-sub">{provider.slug}</div>
           <div className="mt-3 space-y-1 text-sm text-sub">
             <p>Provider status: <span className="text-ink">{provider.status}</span></p>
-            <p>Payout wallet: <span className="font-mono text-ink">{provider.payoutWalletAddress}</span></p>
-            <p>Owner wallet: <span className="font-mono text-ink">{provider.walletAddress}</span></p>
+            <p>Payout wallet: <span className="font-mono text-ink">{truncateAddress(provider.payoutWalletAddress)}</span></p>
+            <p>Owner wallet: <span className="font-mono text-ink">{truncateAddress(provider.walletAddress)}</span></p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -231,11 +268,54 @@ function ProviderModerationCard({
   );
 }
 
+function SettlementBatchCard({
+  batch,
+  busyKey,
+  onRetry
+}: {
+  batch: SettlementBatchRecord;
+  busyKey: string | null;
+  onRetry: () => void;
+}) {
+  const explorerHref = batch.txHash ? `${getExplorerBaseUrl()}/transactions/${batch.txHash}` : null;
+  const canRetry = batch.status === 'failed';
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-ink">{batch.batchId}</p>
+          <p className="mt-1 text-xs text-sub">Created {formatDate(batch.createdAt)}</p>
+        </div>
+        <span className="rounded-full border border-white/10 px-3 py-1 font-mono text-[10px] text-sub">{batch.status}</span>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-sm text-sub">
+        <p>Buyer debits: <span className="font-mono text-ink">{formatEGLD(batch.totalBuyerDebitsAtomic)}</span></p>
+        <p>Provider credits: <span className="font-mono text-ink">{formatEGLD(batch.totalProviderCreditsAtomic)}</span></p>
+        <p>Platform fee: <span className="font-mono text-ink">{formatEGLD(batch.platformFeeAtomic)}</span></p>
+        <p>Lines: <span className="text-ink">{batch.lineCount}</span></p>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {explorerHref ? (
+          <a href={explorerHref} target="_blank" rel="noreferrer" className="action-button inline-flex">
+            View tx →
+          </a>
+        ) : null}
+        <button className="action-button" disabled={!canRetry || busyKey === `settlement-retry:${batch.id}`} onClick={onRetry}>
+          {busyKey === `settlement-retry:${batch.id}` ? 'Retrying…' : 'Retry batch'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-      <div className="font-mono text-xl text-ink">{value}</div>
-      <div className="mt-2 text-xs uppercase tracking-[0.18em] text-muted">{label}</div>
+    <div className="panel-surface p-4">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-muted">{label}</p>
+      <p className="mt-2 font-mono text-lg text-ink">{value}</p>
     </div>
   );
 }
