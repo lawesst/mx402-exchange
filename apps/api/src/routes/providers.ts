@@ -578,6 +578,16 @@ export async function registerProviderRoutes(app: FastifyInstance) {
       },
       take: 20
     });
+    const recentClaims = await prisma.chainTransaction.findMany({
+      where: {
+        related_provider_id: provider.id,
+        tx_kind: "provider_claim"
+      },
+      orderBy: {
+        created_at: "desc"
+      },
+      take: 20
+    });
 
     return reply.code(200).send({
       providerId: provider.id,
@@ -594,6 +604,13 @@ export async function registerProviderRoutes(app: FastifyInstance) {
         charged: event.charged,
         amountAtomic: event.amount_atomic.toString(),
         occurredAt: event.occurred_at.toISOString()
+      })),
+      recentClaims: recentClaims.map((claim) => ({
+        txHash: claim.tx_hash,
+        status: claim.status,
+        amountAtomic: claim.amount_atomic?.toString() ?? "0",
+        confirmedAt: claim.confirmed_at?.toISOString() ?? null,
+        createdAt: claim.created_at.toISOString()
       }))
     });
   });

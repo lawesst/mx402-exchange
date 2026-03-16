@@ -11,6 +11,7 @@
     "db:push": "npm run db:push --workspace @mx402/db",
     "dev:api": "npm run dev --workspace @mx402/api",
     "dev:gateway": "npm run dev --workspace @mx402/gateway",
+    "dev:provider-mock": "tsx scripts/devnet-provider-mock.ts",
     "dev:worker": "npm run dev --workspace @mx402/worker",
     "dev:web": "npm run dev --workspace @mx402/web",
     "lint": "npm run lint --workspaces --if-present",

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import {
@@ -37,6 +37,7 @@ export function AdminScreen() {
     error: batchesError
   } = useSettlementBatchesQuery(isAdmin);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [expandedBatchIds, setExpandedBatchIds] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -69,6 +70,29 @@ export function AdminScreen() {
   const dataError = (viewerError as Error | null) ?? (providersError as Error | null) ?? (batchesError as Error | null);
   const pendingProducts = (providers ?? []).flatMap((provider) => provider.products).filter((product) => product.status === 'pending_review').length;
   const activeProducts = (providers ?? []).flatMap((provider) => provider.products).filter((product) => product.status === 'active').length;
+  const settlementTotals = useMemo(
+    () =>
+      (settlementBatches ?? []).reduce(
+        (summary, batch) => {
+          summary.totalDebits += BigInt(batch.totalBuyerDebitsAtomic);
+          summary.totalCredits += BigInt(batch.totalProviderCreditsAtomic);
+          summary.totalFees += BigInt(batch.platformFeeAtomic);
+          return summary;
+        },
+        {
+          totalDebits: 0n,
+          totalCredits: 0n,
+          totalFees: 0n
+        }
+      ),
+    [settlementBatches]
+  );
+
+  function toggleBatch(batchId: string) {
+    setExpandedBatchIds((current) =>
+      current.includes(batchId) ? current.filter((id) => id !== batchId) : [...current, batchId]
+    );
+  }
 
   return (
     <AppShell>
@@ -136,6 +160,8 @@ export function AdminScreen() {
                     <Metric label="Pending providers" value={String((providers ?? []).filter((provider) => provider.status === 'pending').length)} />
                     <Metric label="Pending products" value={String(pendingProducts)} />
                     <Metric label="Active products" value={String(activeProducts)} />
+                    <Metric label="Settled buyer debits" value={formatEGLD(settlementTotals.totalDebits.toString())} />
+                    <Metric label="Settled provider credits" value={formatEGLD(settlementTotals.totalCredits.toString())} />
                   </div>
                 </Panel>
 
@@ -164,7 +190,9 @@ export function AdminScreen() {
                         <SettlementBatchCard
                           key={batch.id}
                           batch={batch}
+                          expanded={expandedBatchIds.includes(batch.id)}
                           busyKey={busyKey}
+                          onToggle={() => toggleBatch(batch.id)}
                           onRetry={() =>
                             runAction(`settlement-retry:${batch.id}`, () => retrySettlementBatch(batch.id), `Marked batch ${batch.batchId} for retry.`)
                           }
@@ -270,11 +298,15 @@ function ProviderModerationCard({
 
 function SettlementBatchCard({
   batch,
+  expanded,
   busyKey,
+  onToggle,
   onRetry
 }: {
   batch: SettlementBatchRecord;
+  expanded: boolean;
   busyKey: string | null;
+  onToggle: () => void;
   onRetry: () => void;
 }) {
   const explorerHref = batch.txHash ? `${getExplorerBaseUrl()}/transactions/${batch.txHash}` : null;
@@ -295,6 +327,9 @@ function SettlementBatchCard({
         <p>Provider credits: <span className="font-mono text-ink">{formatEGLD(batch.totalProviderCreditsAtomic)}</span></p>
         <p>Platform fee: <span className="font-mono text-ink">{formatEGLD(batch.platformFeeAtomic)}</span></p>
         <p>Lines: <span className="text-ink">{batch.lineCount}</span></p>
+        <p>Window: <span className="text-ink">{formatDate(batch.windowStartedAt)} → {formatDate(batch.windowEndedAt)}</span></p>
+        <p>Submitted: <span className="text-ink">{batch.submittedAt ? formatDate(batch.submittedAt) : 'Pending'}</span></p>
+        <p>Confirmed: <span className="text-ink">{batch.confirmedAt ? formatDate(batch.confirmedAt) : batch.failedAt ? `Failed ${formatDate(batch.failedAt)}` : 'Pending'}</span></p>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -303,12 +338,55 @@ function SettlementBatchCard({
             View tx →
           </a>
         ) : null}
+        <button className="action-button" onClick={onToggle}>
+          {expanded ? 'Hide lines' : 'View lines'}
+        </button>
         <button className="action-button" disabled={!canRetry || busyKey === `settlement-retry:${batch.id}`} onClick={onRetry}>
           {busyKey === `settlement-retry:${batch.id}` ? 'Retrying…' : 'Retry batch'}
         </button>
       </div>
+
+      {expanded ? (
+        <div className="mt-4 space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+          <p className="display-eyebrow">Line items</p>
+          {batch.lines.length === 0 ? (
+            <p className="text-sm text-sub">No settlement lines were stored for this batch.</p>
+          ) : (
+            batch.lines.map((line) => (
+              <div key={line.id} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-ink">{formatLineType(line.lineType)}</p>
+                    <p className="mt-1 text-xs text-sub">Recorded {formatDate(line.createdAt)}</p>
+                  </div>
+                  <div className="font-mono text-sm text-ink">{formatEGLD(line.amountAtomic)}</div>
+                </div>
+                <div className="mt-3 grid gap-2 text-xs text-sub md:grid-cols-2">
+                  <p>Usage events: <span className="text-ink">{line.sourceUsageEventCount}</span></p>
+                  <p>Buyer: <span className="font-mono text-ink">{truncateAddress(line.buyerWalletAddress)}</span></p>
+                  <p>Provider: <span className="text-ink">{line.providerDisplayName ?? 'Platform treasury'}</span></p>
+                  <p>Provider slug: <span className="font-mono text-ink">{line.providerSlug ?? 'n/a'}</span></p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function formatLineType(value: SettlementBatchRecord['lines'][number]['lineType']) {
+  switch (value) {
+    case 'buyer_debit':
+      return 'Buyer debit';
+    case 'provider_credit':
+      return 'Provider credit';
+    case 'platform_fee':
+      return 'Platform fee';
+    default:
+      return value;
+  }
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

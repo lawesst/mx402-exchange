@@ -166,17 +166,19 @@ export function PublishScreen() {
   const [providerErrorMessage, setProviderErrorMessage] = useState<string | null>(null);
 
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [isCreatingNewDraft, setIsCreatingNewDraft] = useState(false);
   const [productDraft, setProductDraft] = useState<ProductDraft>(emptyProductDraft);
   const [productBusy, setProductBusy] = useState(false);
   const [productMessage, setProductMessage] = useState<string | null>(null);
   const [productErrorMessage, setProductErrorMessage] = useState<string | null>(null);
   const [rotateSecret, setRotateSecret] = useState(false);
 
-  const selectedProduct =
-    (providerProducts ?? []).find((product) => product.id === selectedProductId) ??
-    (providerProducts ?? []).find((product) => ['draft', 'paused'].includes(product.status)) ??
-    (providerProducts ?? [])[0] ??
-    null;
+  const selectedProduct = isCreatingNewDraft
+    ? null
+    : (providerProducts ?? []).find((product) => product.id === selectedProductId) ??
+      (providerProducts ?? []).find((product) => ['draft', 'paused'].includes(product.status)) ??
+      (providerProducts ?? [])[0] ??
+      null;
 
   useEffect(() => {
     if (providerProfile) {
@@ -196,6 +198,10 @@ export function PublishScreen() {
       return;
     }
 
+    if (isCreatingNewDraft) {
+      return;
+    }
+
     if (selectedProductId && providerProducts.some((product) => product.id === selectedProductId)) {
       return;
     }
@@ -205,7 +211,7 @@ export function PublishScreen() {
         providerProducts[0]?.id ??
         null
     );
-  }, [providerProducts, selectedProductId]);
+  }, [isCreatingNewDraft, providerProducts, selectedProductId]);
 
   useEffect(() => {
     if (selectedProduct) {
@@ -297,6 +303,7 @@ export function PublishScreen() {
 
   function handleStartNewDraft() {
     setSelectedProductId(null);
+    setIsCreatingNewDraft(true);
     setProductDraft({
       ...emptyProductDraft,
       slug: slugify(productDraft.slug || productDraft.name || 'new-api'),
@@ -328,6 +335,7 @@ export function PublishScreen() {
       } else {
         const created = (await submitProviderProduct(payload)) as { id: string };
         setSelectedProductId(created.id);
+        setIsCreatingNewDraft(false);
         setProductMessage('Draft created.');
       }
 
@@ -361,6 +369,7 @@ export function PublishScreen() {
         const created = (await submitProviderProduct(payload)) as { id: string };
         productId = created.id;
         setSelectedProductId(created.id);
+        setIsCreatingNewDraft(false);
       }
 
       if (!productId) {
@@ -723,6 +732,7 @@ export function PublishScreen() {
                                     className={`block w-full rounded-2xl border p-4 text-left transition ${active ? 'border-accent/35 bg-accent/10' : 'border-white/10 bg-white/[0.03] hover:border-white/20'}`}
                                     onClick={() => {
                                       setSelectedProductId(product.id);
+                                      setIsCreatingNewDraft(false);
                                       setPublishStep(0);
                                       setProductMessage(null);
                                       setProductErrorMessage(null);

@@ -7,6 +7,7 @@ import type {
   ProductDetail,
   AdminProviderRecord,
   ProjectApiKey,
+  PreparedBalanceCall,
   ProjectDetail,
   PreparedProviderClaim,
   ProviderProfile,
@@ -362,6 +363,20 @@ export async function fetchWalletTransactions(address: string) {
 export async function fetchMirrorTransactions() {
   const response = await fetchInternal<{ data: MirrorTransaction[] }>('/v1/chain-transactions', { method: 'GET' }, true);
   return response?.data ?? [];
+}
+
+export async function prepareDeposit(input: { amountAtomic: string }) {
+  return fetchInternal<PreparedBalanceCall>('/v1/balance/deposit/prepare', {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+}
+
+export async function trackDeposit(input: { txHash: string; amountAtomic: string }) {
+  return fetchInternal('/v1/balance/deposits/track', {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
 }
 
 export async function createSessionWithNativeAuth(input: { nativeAuthToken: string; displayName?: string }) {

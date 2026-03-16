@@ -51,3 +51,20 @@ Explorer links:
 - The local runtime was updated to use the new ledger contract and `EGLD` in `.env.local`.
 - For this validation run, chain-read polling used the public devnet API and gateway because the Kepler chain-read gateway lagged transaction finality for newly submitted devnet transactions.
 - The buyer claimable balance and settlement confirmation both reached `confirmed=1`, `failed=0`, `pending=0` in the scenario run.
+
+## Browser UI Validation
+- Verified `/publish` from the browser UI by creating and submitting a fresh listing:
+  - Product name: `UI Publish 775156`
+  - Product slug: `ui-publish-775156`
+- Verified `/admin` from the browser UI by activating the submitted listing.
+- Verified `/api/devnet-wallet-risk-score` from the browser UI by creating a buyer project, minting an API key, granting the product, and executing a paid call:
+  - Buyer project: `Buyer UI 618175`
+  - Receipt: `rcpt_d6d438db12fc564a70ea`
+  - Charged amount: `0.0010 EGLD`
+- Verified the new settlement-batch drilldown UI renders line items from the live API.
+- Verified the provider analytics UI renders claim history entries with explorer links.
+
+## Local Dev Services Used For UI Validation
+- Gateway: `http://127.0.0.1:4020`
+- Provider mock: `http://127.0.0.1:4580`
+- The local provider mock serves `/risk/{address}` so the browser-driven paid call can complete without the scenario harness running.

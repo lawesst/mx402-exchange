@@ -102,6 +102,7 @@ export function AnalyticsScreen() {
   }
 
   const explorerTxHref = claimTxHash ? `${getExplorerBaseUrl()}/transactions/${claimTxHash}` : null;
+  const lastKnownClaimHash = claimTxHash ?? earnings?.recentClaims?.[0]?.txHash ?? null;
 
   return (
     <AppShell>
@@ -214,8 +215,46 @@ export function AnalyticsScreen() {
                   <p>Provider status: <span className="text-ink">{viewer?.provider?.status ?? 'unknown'}</span></p>
                   <p>Provider slug: <span className="font-mono text-ink">{viewer?.provider?.slug ?? 'n/a'}</span></p>
                   <p>Recent usage samples: <span className="text-ink">{formatCompactNumber(earnings?.recentUsage.length ?? 0)}</span></p>
-                  <p>Last claim tx: <span className="font-mono text-ink">{claimTxHash ? truncateAddress(claimTxHash) : 'none submitted in this session'}</span></p>
+                  <p>Last claim tx: <span className="font-mono text-ink">{lastKnownClaimHash ? truncateAddress(lastKnownClaimHash) : 'none tracked yet'}</span></p>
                 </div>
+              </Panel>
+
+              <Panel title="Claim history" kicker="Chain transactions">
+                <DataState
+                  empty={(earnings?.recentClaims ?? []).length === 0}
+                  emptyTitle="No provider claims tracked yet"
+                  emptyCopy="Once claimProviderEarnings transactions are submitted, their status and explorer links will appear here."
+                >
+                  <div className="space-y-3">
+                    {(earnings?.recentClaims ?? []).map((claim) => {
+                      const href = `${getExplorerBaseUrl()}/transactions/${claim.txHash}`;
+                      return (
+                        <div key={claim.txHash} className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-mono text-sm text-ink">{truncateAddress(claim.txHash)}</p>
+                              <p className="mt-1 text-xs text-sub">
+                                Submitted {formatDate(claim.createdAt)}
+                                {claim.confirmedAt ? ` · Confirmed ${formatDate(claim.confirmedAt)}` : ''}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-mono text-sm text-ink">{formatEGLD(claim.amountAtomic)}</p>
+                              <p className={`mt-1 text-xs ${claim.status === 'confirmed' ? 'text-success' : claim.status === 'failed' ? 'text-danger' : 'text-gold'}`}>
+                                {claim.status}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-3">
+                            <a href={href} target="_blank" rel="noreferrer" className="action-button inline-flex">
+                              View on explorer →
+                            </a>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </DataState>
               </Panel>
             </div>
           </div>

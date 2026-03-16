@@ -1,6 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import BigNumber from 'bignumber.js';
 
 import { AppShell } from '../app-shell';
 import { DataState } from '../data-state';
@@ -8,19 +10,86 @@ import { Panel } from '../panel';
 import { formatCompactNumber, formatDate, formatEGLD, truncateAddress } from '../../lib/format';
 import { useMirrorTransactionsQuery, useUsageEventsQuery, useViewerQuery, useWalletAccountQuery, useWalletTransactionsQuery } from '../../lib/hooks';
 import { useWalletController } from '../../app/wallet-provider';
+import { prepareDeposit, trackDeposit } from '../../lib/api';
+import { signAndSendPreparedTransaction } from '../../lib/multiversx';
 
 export function WalletScreen() {
+  const queryClient = useQueryClient();
   const { wallet } = useWalletController();
   const { data: viewer } = useViewerQuery();
   const { data: usageEvents } = useUsageEventsQuery(Boolean(viewer?.user));
   const { data: account, isLoading: walletLoading, error } = useWalletAccountQuery(wallet.address);
   const { data: walletTransactions } = useWalletTransactionsQuery(wallet.address);
   const { data: mirrorTransactions } = useMirrorTransactionsQuery(Boolean(viewer?.user));
+  const [depositAmount, setDepositAmount] = useState('0.02');
+  const [depositBusy, setDepositBusy] = useState(false);
+  const [depositMessage, setDepositMessage] = useState<string | null>(null);
+  const [depositError, setDepositError] = useState<string | null>(null);
+  const [latestDepositTxHash, setLatestDepositTxHash] = useState<string | null>(null);
 
   const spentAtomic = useMemo(
     () => (usageEvents ?? []).reduce((sum, item) => sum + Number(item.amountAtomic), 0),
     [usageEvents]
   );
+  const explorerBaseUrl = process.env.NEXT_PUBLIC_MULTIVERSX_EXPLORER_URL ?? 'https://devnet-explorer.multiversx.com';
+  const latestDepositHref = latestDepositTxHash ? `${explorerBaseUrl}/transactions/${latestDepositTxHash}` : null;
+
+  async function refreshWalletViews() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['viewer'] }),
+      queryClient.invalidateQueries({ queryKey: ['wallet-account', wallet.address] }),
+      queryClient.invalidateQueries({ queryKey: ['wallet-transactions', wallet.address] }),
+      queryClient.invalidateQueries({ queryKey: ['mirror-transactions'] })
+    ]);
+  }
+
+  async function handleDeposit() {
+    if (!viewer?.user?.walletAddress) {
+      setDepositError('Authenticate the buyer session before funding the MX402 ledger.');
+      return;
+    }
+
+    const normalizedAmount = new BigNumber(depositAmount);
+    if (!normalizedAmount.isFinite() || normalizedAmount.lte(0)) {
+      setDepositError('Enter a valid EGLD amount before funding the ledger.');
+      return;
+    }
+
+    setDepositBusy(true);
+    setDepositMessage(null);
+    setDepositError(null);
+
+    try {
+      const amountAtomic = normalizedAmount.multipliedBy('1e18').integerValue(BigNumber.ROUND_FLOOR).toFixed(0);
+      const prepared = await prepareDeposit({ amountAtomic });
+      if (!prepared) {
+        throw new Error('Deposit preparation returned no payload');
+      }
+
+      const submitted = await signAndSendPreparedTransaction({
+        preparedCall: prepared,
+        expectedSender: viewer.user.walletAddress,
+        displayInfo: {
+          processingMessage: 'Submitting buyer deposit',
+          successMessage: 'Buyer deposit submitted',
+          errorMessage: 'Buyer deposit failed'
+        }
+      });
+
+      await trackDeposit({
+        txHash: submitted.txHash,
+        amountAtomic
+      });
+
+      setLatestDepositTxHash(submitted.txHash);
+      setDepositMessage('Deposit transaction submitted. Wait for confirmation, then refresh the mirrored transaction list.');
+      await refreshWalletViews();
+    } catch (depositFailure) {
+      setDepositError(depositFailure instanceof Error ? depositFailure.message : 'Failed to submit buyer deposit');
+    } finally {
+      setDepositBusy(false);
+    }
+  }
 
   return (
     <AppShell>
@@ -60,6 +129,38 @@ export function WalletScreen() {
                 <Metric label="Nonce" value={formatCompactNumber(account?.nonce ?? 0)} mono />
                 <Metric label="Spent via MX402" value={formatEGLD(spentAtomic)} />
               </div>
+
+              <Panel title="Fund buyer balance" kicker="Ledger deposit">
+                <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+                  <div className="space-y-3">
+                    <label className="text-xs uppercase tracking-[0.16em] text-muted" htmlFor="deposit-egld">
+                      Deposit amount (EGLD)
+                    </label>
+                    <input
+                      id="deposit-egld"
+                      className="w-full rounded-2xl border border-white/10 bg-panel/80 px-4 py-3 font-mono text-sm text-ink outline-none transition focus:border-accent/40"
+                      value={depositAmount}
+                      onChange={(event) => setDepositAmount(event.target.value)}
+                      inputMode="decimal"
+                    />
+                    <button className="action-button-primary" disabled={depositBusy || !wallet.address} onClick={() => void handleDeposit()}>
+                      {depositBusy ? 'Submitting deposit…' : 'Deposit EGLD'}
+                    </button>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-sub">
+                    <p>Connected wallet: <span className="font-mono text-ink">{truncateAddress(wallet.address)}</span></p>
+                    <p className="mt-2">This signs the `deposit` call against the active MX402 ledger contract and tracks the resulting tx for the mirrored buyer balance.</p>
+                    {depositMessage ? <p className="mt-3 text-success">{depositMessage}</p> : null}
+                    {depositError ? <p className="mt-3 text-danger">{depositError}</p> : null}
+                    {latestDepositHref ? (
+                      <a href={latestDepositHref} target="_blank" rel="noreferrer" className="action-button mt-4 inline-flex">
+                        View latest deposit tx →
+                      </a>
+                    ) : null}
+                  </div>
+                </div>
+              </Panel>
 
               <Panel title="Wallet transactions" kicker="Chain history">
                 <DataState

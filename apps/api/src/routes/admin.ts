@@ -257,6 +257,22 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     const prisma = getPrismaClient();
     const batches = await prisma.settlementBatch.findMany({
+      include: {
+        lines: {
+          include: {
+            buyer: true,
+            provider: true
+          },
+          orderBy: [
+            {
+              line_type: "asc"
+            },
+            {
+              amount_atomic: "desc"
+            }
+          ]
+        }
+      },
       orderBy: {
         created_at: "desc"
       },
@@ -274,7 +290,23 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         platformFeeAtomic: batch.platform_fee_atomic.toString(),
         lineCount: batch.line_count,
         txHash: batch.tx_hash,
-        createdAt: batch.created_at.toISOString()
+        windowStartedAt: batch.window_started_at.toISOString(),
+        windowEndedAt: batch.window_ended_at.toISOString(),
+        submittedAt: batch.submitted_at?.toISOString() ?? null,
+        confirmedAt: batch.confirmed_at?.toISOString() ?? null,
+        failedAt: batch.failed_at?.toISOString() ?? null,
+        createdAt: batch.created_at.toISOString(),
+        lines: batch.lines.map((line) => ({
+          id: line.id,
+          lineType: line.line_type,
+          amountAtomic: line.amount_atomic.toString(),
+          sourceUsageEventCount: line.source_usage_event_count,
+          buyerWalletAddress: line.buyer?.wallet_address ?? null,
+          providerId: line.provider_id,
+          providerSlug: line.provider?.slug ?? null,
+          providerDisplayName: line.provider?.display_name ?? null,
+          createdAt: line.created_at.toISOString()
+        }))
       }))
     });
   });

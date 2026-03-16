@@ -195,6 +195,13 @@ export type ProviderEarnings = {
     amountAtomic: string;
     occurredAt: string;
   }>;
+  recentClaims: Array<{
+    txHash: string;
+    status: string;
+    amountAtomic: string;
+    confirmedAt: string | null;
+    createdAt: string;
+  }>;
 };
 
 export type UsageReceipt = {
@@ -314,11 +321,40 @@ export type SettlementBatchRecord = {
   platformFeeAtomic: string;
   lineCount: number;
   txHash: string | null;
+  windowStartedAt: string;
+  windowEndedAt: string;
+  submittedAt: string | null;
+  confirmedAt: string | null;
+  failedAt: string | null;
   createdAt: string;
+  lines: Array<{
+    id: string;
+    lineType: 'buyer_debit' | 'provider_credit' | 'platform_fee';
+    amountAtomic: string;
+    sourceUsageEventCount: number;
+    buyerWalletAddress: string | null;
+    providerId: string | null;
+    providerSlug: string | null;
+    providerDisplayName: string | null;
+    createdAt: string;
+  }>;
 };
 
 export type SettlementRefreshResult = {
   confirmed: number;
   failed: number;
   pending: number;
+};
+
+export type PreparedBalanceCall = {
+  receiver: string;
+  chainId: string;
+  function: string;
+  data: string;
+  value: string;
+  gasPrice: number;
+  version: number;
+  amountAtomic?: string;
+  gasLimit: number;
+  balance: BuyerBalance;
 };
