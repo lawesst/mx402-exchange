@@ -161,7 +161,14 @@ function buildUpstreamUrl(input: {
   pathParams: Record<string, string>;
   query: Record<string, string | number | boolean>;
 }) {
-  const url = new URL(renderUpstreamPath(input.upstreamPathTemplate, input.pathParams), input.baseUrl);
+  const normalizedBaseUrl = input.baseUrl.endsWith("/")
+    ? input.baseUrl
+    : `${input.baseUrl}/`;
+  const renderedPath = renderUpstreamPath(input.upstreamPathTemplate, input.pathParams);
+  const normalizedPath = renderedPath.startsWith("/")
+    ? renderedPath.slice(1)
+    : renderedPath;
+  const url = new URL(normalizedPath, normalizedBaseUrl);
 
   for (const [key, value] of Object.entries(input.query)) {
     url.searchParams.set(key, String(value));
