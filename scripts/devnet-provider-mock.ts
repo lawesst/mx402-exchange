@@ -29,6 +29,41 @@ const server = createServer((request, response) => {
     });
   }
 
+  if (request.method === "GET" && url.pathname.startsWith("/activity/")) {
+    const address = decodeURIComponent(url.pathname.replace("/activity/", ""));
+
+    return respondJson(response, 200, {
+      address,
+      activeDays30d: 9,
+      contractInteractions30d: 14,
+      tokenTransfers30d: 27,
+      source: "mx402-devnet-provider-mock"
+    });
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/labels/")) {
+    const address = decodeURIComponent(url.pathname.replace("/labels/", ""));
+
+    return respondJson(response, 200, {
+      address,
+      labels: ["defi-user", "nft-holder"],
+      confidence: 0.91,
+      source: "mx402-devnet-provider-mock"
+    });
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/portfolio/")) {
+    const address = decodeURIComponent(url.pathname.replace("/portfolio/", ""));
+
+    return respondJson(response, 200, {
+      address,
+      uniqueTokens: 6,
+      nftCollections: 2,
+      estimatedUsdValue: 143.27,
+      source: "mx402-devnet-provider-mock"
+    });
+  }
+
   return respondJson(response, 404, {
     error: "not found"
   });

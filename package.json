@@ -7,7 +7,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run prisma:generate --workspace @mx402/db && npm run build --workspaces --if-present",
+    "build": "npm run build:vercel-runtime && npm run build --workspace @mx402/gateway-sdk && npm run build --workspace @mx402/provider-sdk && MX402_RUNTIME_READY=1 npm run build --workspace @mx402/web",
+    "build:vercel-runtime": "npm run prisma:generate --workspace @mx402/db && npm run build --workspace @mx402/config && npm run build --workspace @mx402/db && npm run build --workspace @mx402/domain && npm run build --workspace @mx402/multiversx && npm run build --workspace @mx402/observability && npm run build --workspace @mx402/api && npm run build --workspace @mx402/gateway && npm run build --workspace @mx402/worker",
     "db:push": "npm run db:push --workspace @mx402/db",
     "dev:api": "npm run dev --workspace @mx402/api",
     "dev:gateway": "npm run dev --workspace @mx402/gateway",
@@ -16,6 +17,10 @@
     "dev:web": "npm run dev --workspace @mx402/web",
     "lint": "npm run lint --workspaces --if-present",
     "prisma:generate": "npm run prisma:generate --workspace @mx402/db",
+    "start:api": "npm run start --workspace @mx402/api",
+    "start:gateway": "npm run start --workspace @mx402/gateway",
+    "start:provider-mock": "tsx scripts/devnet-provider-mock.ts",
+    "start:worker": "npm run start --workspace @mx402/worker",
     "seed:demo": "tsx scripts/seed-demo.ts",
     "deploy:devnet:ledger": "tsx scripts/deploy-devnet-ledger.ts",
     "scenario:e2e": "npm run build && tsx scripts/e2e-local.ts",

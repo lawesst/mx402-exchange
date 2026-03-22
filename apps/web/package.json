@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "MX402_NEXT_DIST_DIR=.next-build NEXT_IGNORE_INCORRECT_LOCKFILE=1 next build",
+    "build": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 sh -c 'if [ \"$MX402_RUNTIME_READY\" != \"1\" ]; then cd ../.. && npm run build:vercel-runtime && cd apps/web; fi && mkdir -p .prisma && rm -rf .prisma/client && cp -R ../../packages/db/node_modules/.prisma/client .prisma/client && if [ \"$VERCEL\" = \"1\" ]; then next build; else MX402_NEXT_DIST_DIR=.next-build next build; fi'",
     "dev": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 node dev-server.mjs",
-    "start": "MX402_NEXT_DIST_DIR=.next-build next start"
+    "start": "sh -c 'if [ -d .next-build ]; then MX402_NEXT_DIST_DIR=.next-build next start; else next start; fi'"
   },
   "dependencies": {
     "@multiversx/sdk-core": "^15.4.0",

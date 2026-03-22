@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/__mx402_worker/run",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}
